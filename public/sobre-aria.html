@@ -1,0 +1,696 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<meta name="robots" content="noindex"/>
+<title>Aria — Concierge Digital · The World Keys</title>
+</head>
+<body>
+<style>
+  :root {
+    --ink: #070b10;
+    --ink-2: #0f1218;
+    --paper: #ede9df;
+    --card: #f7f4ef;
+    --text: #1d222b;
+    --muted: #6e6a5e;
+    --hairline: #d9d2c0;
+    --gold: #c9a96e;
+    --gold-light: #e4c990;
+    --gold-dark: #9e7c48;
+    --silver: #9a97a8;
+    --ok: #4a6b4f;
+    --ok-bg: #e6ece2;
+    --alert: #8a4b3c;
+    --alert-bg: #efe2dc;
+    --hero-ink: #070b10;
+    --serif: 'Cormorant Garamond', Georgia, 'Times New Roman', serif;
+    --sans: 'Jost', 'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #0a0d12;
+      --card: #10141b;
+      --text: #e6e1d4;
+      --muted: #98937f;
+      --hairline: #262b34;
+      --gold-dark: #d3b57e;
+      --ok: #93b393;
+      --ok-bg: #17231a;
+      --alert: #c98f7d;
+      --alert-bg: #291b16;
+      --silver: #7d7a8a;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #0a0d12;
+    --card: #10141b;
+    --text: #e6e1d4;
+    --muted: #98937f;
+    --hairline: #262b34;
+    --gold-dark: #d3b57e;
+    --ok: #93b393;
+    --ok-bg: #17231a;
+    --alert: #c98f7d;
+    --alert-bg: #291b16;
+    --silver: #7d7a8a;
+  }
+  :root[data-theme="light"] {
+    --paper: #ede9df;
+    --card: #f7f4ef;
+    --text: #1d222b;
+    --muted: #6e6a5e;
+    --hairline: #d9d2c0;
+    --gold-dark: #9e7c48;
+    --ok: #4a6b4f;
+    --ok-bg: #e6ece2;
+    --alert: #8a4b3c;
+    --alert-bg: #efe2dc;
+    --silver: #9a97a8;
+  }
+
+  html { background: var(--paper); }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ─── Seletor de idioma ─── */
+  .lang-switch {
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    z-index: 20;
+    display: flex;
+    border: 1px solid rgba(201, 169, 110, 0.55);
+    background: rgba(7, 11, 16, 0.72);
+    backdrop-filter: blur(4px);
+  }
+  .lang-btn {
+    font-family: var(--sans);
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    padding: 7px 13px 6px;
+    background: none;
+    border: 0;
+    color: #b8b3a6;
+    cursor: pointer;
+  }
+  .lang-btn[aria-pressed="true"] {
+    color: #070b10;
+    background: var(--gold);
+    font-weight: 600;
+  }
+  .lang-btn:focus-visible {
+    outline: 2px solid var(--gold-light);
+    outline-offset: 2px;
+  }
+
+  /* Alternância de conteúdo: PT é o padrão. */
+  .lang-fr { display: none; }
+  :root[data-lang="fr"] .lang-pt { display: none; }
+  :root[data-lang="fr"] .lang-fr { display: block; }
+
+  .hero {
+    background: var(--hero-ink);
+    padding: 64px 24px 56px;
+    text-align: center;
+  }
+  .hero .wordmark {
+    font-family: var(--serif);
+    font-size: clamp(34px, 6vw, 52px);
+    font-weight: 400;
+    letter-spacing: 0.28em;
+    text-indent: 0.28em;
+    color: var(--gold);
+    margin: 0;
+  }
+  .hero .tagline {
+    font-family: var(--sans);
+    font-size: 11px;
+    letter-spacing: 0.38em;
+    text-indent: 0.38em;
+    color: var(--silver);
+    text-transform: uppercase;
+    margin: 14px 0 0;
+  }
+  .hero .thesis {
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: clamp(19px, 3vw, 24px);
+    color: #ded9cc;
+    max-width: 34em;
+    margin: 36px auto 0;
+    line-height: 1.5;
+    text-wrap: balance;
+  }
+  .gold-rule {
+    height: 2px;
+    background: linear-gradient(90deg, var(--gold-dark), var(--gold-light), var(--gold-dark));
+  }
+
+  main {
+    max-width: 880px;
+    margin: 0 auto;
+    padding: 0 24px 80px;
+  }
+
+  .eyebrow {
+    font-size: 11px;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: var(--gold-dark);
+    margin: 72px 0 8px;
+    font-weight: 500;
+  }
+  h2 {
+    font-family: var(--serif);
+    font-size: clamp(26px, 4vw, 34px);
+    font-weight: 500;
+    line-height: 1.2;
+    margin: 0 0 18px;
+    text-wrap: balance;
+  }
+  .lede {
+    font-size: 17.5px;
+    max-width: 40em;
+  }
+  p { max-width: 42em; }
+  .section-intro { color: var(--muted); max-width: 40em; margin-top: 0; }
+
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 1px;
+    background: var(--hairline);
+    border: 1px solid var(--hairline);
+    margin-top: 40px;
+  }
+  .stat {
+    background: var(--card);
+    padding: 22px 20px 18px;
+  }
+  .stat .n {
+    font-family: var(--serif);
+    font-size: 34px;
+    line-height: 1;
+    color: var(--gold-dark);
+    font-variant-numeric: tabular-nums;
+  }
+  .stat .l {
+    font-size: 12.5px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-top: 8px;
+    line-height: 1.45;
+  }
+
+  .cap-list { margin: 28px 0 0; padding: 0; list-style: none; display: grid; gap: 22px; }
+  .cap-list li { max-width: 44em; padding-left: 26px; position: relative; }
+  .cap-list li::before {
+    content: "";
+    position: absolute;
+    left: 0; top: 0.62em;
+    width: 12px; height: 1px;
+    background: var(--gold-dark);
+  }
+  .cap-list strong { font-weight: 600; }
+
+  .quotes {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 20px;
+    margin-top: 32px;
+  }
+  .quote {
+    background: var(--card);
+    border: 1px solid var(--hairline);
+    border-top: 2px solid var(--gold);
+    padding: 22px 24px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .quote .chips { display: flex; gap: 8px; flex-wrap: wrap; }
+  .chip {
+    font-size: 10.5px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    padding: 3px 9px;
+    border: 1px solid var(--hairline);
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .chip.lang { color: var(--gold-dark); border-color: var(--gold-dark); }
+  .quote blockquote {
+    margin: 0;
+    font-family: var(--serif);
+    font-size: 18.5px;
+    line-height: 1.55;
+    font-style: italic;
+  }
+  .quote blockquote.ja { font-style: normal; font-size: 16.5px; }
+  .quote .ctx {
+    font-size: 13px;
+    color: var(--muted);
+    line-height: 1.55;
+    border-top: 1px solid var(--hairline);
+    padding-top: 12px;
+    margin-top: auto;
+  }
+
+  .trust {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 20px 36px;
+    margin-top: 30px;
+  }
+  .trust div h3 {
+    font-family: var(--serif);
+    font-size: 19px;
+    font-weight: 600;
+    margin: 0 0 6px;
+  }
+  .trust div p { font-size: 14.5px; color: var(--muted); margin: 0; }
+
+  .incident {
+    background: var(--card);
+    border: 1px solid var(--hairline);
+    margin-top: 28px;
+    padding: 26px 28px 24px;
+  }
+  .incident header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 18px;
+  }
+  .incident h3 {
+    font-family: var(--serif);
+    font-size: 21px;
+    font-weight: 600;
+    margin: 0;
+  }
+  .incident .date { font-size: 12.5px; color: var(--muted); letter-spacing: 0.08em; font-variant-numeric: tabular-nums; }
+  .status {
+    display: inline-block;
+    font-size: 10.5px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    padding: 4px 10px;
+    font-weight: 600;
+  }
+  .status.fixed { background: var(--ok-bg); color: var(--ok); }
+  .facts { display: grid; gap: 14px; margin: 0; }
+  .facts > div { display: grid; grid-template-columns: 150px 1fr; gap: 14px; }
+  .facts dt {
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--muted);
+    padding-top: 3px;
+  }
+  .facts dd { margin: 0; font-size: 15px; max-width: 40em; }
+  .facts .bad-sample {
+    font-family: var(--serif);
+    font-style: italic;
+    background: var(--alert-bg);
+    color: var(--alert);
+    padding: 8px 14px;
+    display: inline-block;
+    margin-top: 6px;
+    font-size: 15.5px;
+  }
+  @media (max-width: 560px) {
+    .facts > div { grid-template-columns: 1fr; gap: 2px; }
+  }
+
+  .closing {
+    margin-top: 84px;
+    border-top: 1px solid var(--hairline);
+    padding-top: 44px;
+    text-align: center;
+  }
+  .closing p {
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: clamp(20px, 3.4vw, 26px);
+    line-height: 1.5;
+    max-width: 30em;
+    margin: 0 auto;
+    text-wrap: balance;
+  }
+  .closing .sig {
+    font-family: var(--sans);
+    font-style: normal;
+    font-size: 11px;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-top: 28px;
+  }
+</style>
+
+<div class="lang-switch" role="group" aria-label="Idioma / Langue">
+  <button type="button" class="lang-btn" data-lang="pt" aria-pressed="true">PT</button>
+  <button type="button" class="lang-btn" data-lang="fr" aria-pressed="false">FR</button>
+</div>
+
+<div class="hero">
+  <h1 class="wordmark">ARIA</h1>
+  <p class="tagline lang-pt">Concierge &amp; Reservas · The World Keys</p>
+  <p class="tagline lang-fr">Conciergerie &amp; Réservations · The World Keys</p>
+  <p class="thesis lang-pt">O atendimento de um concierge cinco estrelas — multilíngue, com memória e critério — disponível a cada cliente, a qualquer hora, em qualquer idioma.</p>
+  <p class="thesis lang-fr">Le service d'un concierge cinq étoiles — multilingue, doté de mémoire et de discernement — offert à chaque client, à toute heure, dans toutes les langues.</p>
+</div>
+<div class="gold-rule"></div>
+
+<!-- ═══════════════════════ PORTUGUÊS ═══════════════════════ -->
+<main class="lang-pt">
+  <p class="eyebrow">O que é</p>
+  <h2>Uma atendente que nunca fecha</h2>
+  <p class="lede">A Aria atende os dois canais da The World Keys — WhatsApp e email — 24 horas por dia, todos os dias. Ela conversa no idioma de quem escreve, conhece cada restaurante do catálogo, lembra de cada cliente e sabe exatamente quando um assunto precisa de uma pessoa da equipe. Tudo o que ela faz fica visível no painel de operação, onde qualquer conversa pode ser assumida por um humano a um clique.</p>
+
+  <div class="stats">
+    <div class="stat"><div class="n">2</div><div class="l">canais atendidos<br>WhatsApp e email</div></div>
+    <div class="stat"><div class="n">5</div><div class="l">idiomas nas últimas semanas — pt · en · fr · it · ja</div></div>
+    <div class="stat"><div class="n">24/7</div><div class="l">sem fila, sem plantão, sem hora extra</div></div>
+    <div class="stat"><div class="n">100%</div><div class="l">das conversas auditáveis no painel</div></div>
+  </div>
+
+  <p class="eyebrow">Concierge</p>
+  <h2>O que ela faz pelo cliente</h2>
+  <ul class="cap-list">
+    <li><strong>Recomenda como especialista.</strong> O cliente descreve a ocasião — "um lugar romântico com vista", "algo bom para fechar negócio" — e ela sugere apenas casas da curadoria, com o link direto de reserva. Nunca inventa um restaurante nem envia para plataformas de terceiros.</li>
+    <li><strong>Lê o que o cliente mandar.</strong> Áudio, foto e PDF. Diante da foto de um cardápio, recomenda pratos cruzando com as alergias e restrições que conhece daquele cliente — e alerta o que evitar.</li>
+    <li><strong>Resolve a logística do jantar.</strong> Endereço, mapa, distância e horário de saída: "são cerca de 25 minutos até o restaurante — saindo às 19h25, você chega às 20h".</li>
+    <li><strong>Lembra de cada pessoa.</strong> Preferências, alergias e histórico ficam guardados. Na conversa seguinte ela já sabe que o cliente é vegano, ou que a última reserva foi um aniversário — e personaliza sem pedir nada de novo.</li>
+    <li><strong>Cuida do pós-experiência.</strong> Colhe avaliações de forma leve e registra tudo para a empresa aprender — nota do restaurante, nota da plataforma, sugestões.</li>
+  </ul>
+
+  <p class="eyebrow">Suporte &amp; Operação</p>
+  <h2>O que ela resolve nos bastidores</h2>
+  <ul class="cap-list">
+    <li><strong>Localiza e confirma reservas na hora</strong>, pelo código, e conduz cancelamentos e alterações pelo caminho seguro da conta do cliente — sempre com os dados exatos, nunca de memória.</li>
+    <li><strong>Orienta os restaurantes parceiros.</strong> Quando um restaurante responde ao email de notificação em vez de usar o botão oficial, ela agradece, explica o caminho certo no idioma dele e garante que o cliente seja avisado.</li>
+    <li><strong>Sabe a hora de chamar um humano.</strong> Urgências, reembolsos, pedidos especiais e questões formais são escalados à equipe com prioridade e prazo comunicados ao cliente — ninguém fica sem resposta e sem previsão.</li>
+    <li><strong>Ignora ruído com discernimento.</strong> Propagandas, newsletters e relatórios automáticos não recebem resposta: a atenção é reservada a clientes e parceiros reais.</li>
+  </ul>
+
+  <p class="eyebrow">Nas palavras da própria Aria</p>
+  <h2>Exemplos reais das últimas semanas</h2>
+  <p class="section-intro">Trechos extraídos de conversas reais registradas no painel — sem edição de conteúdo.</p>
+
+  <div class="quotes">
+    <div class="quote">
+      <div class="chips"><span class="chip lang">Japonês</span><span class="chip">Email</span></div>
+      <blockquote class="ja">ご予約のキャンセルは、お客様ご自身のアカウントページから行っていただくのが最も確実で安全な方法です。</blockquote>
+      <div class="ctx">Cliente japonesa pediu o cancelamento de uma reserva em Roma. A Aria respondeu integralmente em japonês formal, com todos os dados exatos da reserva, e a guiou ao caminho seguro.</div>
+    </div>
+    <div class="quote">
+      <div class="chips"><span class="chip lang">Italiano</span><span class="chip">Email</span></div>
+      <blockquote>Da quella pagina di gestione potete Accettare, Rifiutare oppure Proporre un nuovo orario: la piattaforma avviserà automaticamente il cliente.</blockquote>
+      <div class="ctx">Restaurante de Roma respondeu ao email de notificação propondo outro horário. A Aria agradeceu e o orientou, em italiano, ao botão oficial que resolve na hora.</div>
+    </div>
+    <div class="quote">
+      <div class="chips"><span class="chip lang">Inglês</span><span class="chip">Email</span></div>
+      <blockquote>Simply open your Pending Request notification, click "Respond to Your Pending Requests," and select Accept — the guest will be informed right away.</blockquote>
+      <div class="ctx">Restaurante de Istambul queria confirmar uma reserva respondendo ao email. A Aria confirmou os dados do pedido e mostrou o caminho que avisa o cliente automaticamente.</div>
+    </div>
+    <div class="quote">
+      <div class="chips"><span class="chip lang">Inglês</span><span class="chip">Email</span></div>
+      <blockquote>Please rest assured that a request of this nature is treated by us as a formal matter, not a routine enquiry.</blockquote>
+      <div class="ctx">Uma empresa portuguesa questionou formalmente uma página da plataforma. A Aria reconheceu a seriedade, pediu os documentos certos e escalou ao time comercial com prazo de 1 dia útil.</div>
+    </div>
+    <div class="quote">
+      <div class="chips"><span class="chip lang">Inglês</span><span class="chip">Email</span></div>
+      <blockquote>I have located your reservation: EK7PDGMC — Casa do Prego, Lagos. Once cancelled, the update is reflected instantly and the restaurant is notified automatically.</blockquote>
+      <div class="ctx">Cliente pediu ajuda com um cancelamento em Portugal. A Aria localizou a reserva, confirmou cada detalhe e conduziu até a conclusão — sem transferir para ninguém.</div>
+    </div>
+    <div class="quote">
+      <div class="chips"><span class="chip lang">Português</span><span class="chip">WhatsApp</span></div>
+      <blockquote>Parece que sua mensagem foi enviada ao contato errado. Se algum dia eu puder ajudá-lo a descobrir ou reservar uma mesa em restaurantes especiais, será um prazer.</blockquote>
+      <div class="ctx">Alguém enviou um pedido de pizza por engano ao número da plataforma. A Aria desfez o mal-entendido com elegância — e ainda deixou a porta aberta.</div>
+    </div>
+  </div>
+
+  <p class="eyebrow">Confiança</p>
+  <h2>Os limites que a protegem — e protegem a marca</h2>
+  <div class="trust">
+    <div>
+      <h3>Nunca pede dados sensíveis</h3>
+      <p>Nem cartão, nem documentos. Reservas são sempre concluídas pelo próprio cliente na plataforma; a Aria não tem poder de criar ou cancelar nada sozinha.</p>
+    </div>
+    <div>
+      <h3>Nunca inventa</h3>
+      <p>Só afirma o que consta na base da empresa. Sem informação, diz que vai verificar e aciona a equipe — jamais promete reembolso ou desconto em nome da TWK.</p>
+    </div>
+    <div>
+      <h3>Discrição absoluta</h3>
+      <p>Problemas técnicos são resolvidos em silêncio: o cliente nunca lê "erro", "sistema" ou "falha". A experiência permanece impecável mesmo quando algo interno falha.</p>
+    </div>
+    <div>
+      <h3>Supervisão humana a um clique</h3>
+      <p>Toda conversa, decisão e escalação aparece no painel em tempo real. Qualquer pessoa da equipe pode assumir uma conversa a qualquer momento — a Aria silencia na hora.</p>
+    </div>
+  </div>
+
+  <p class="eyebrow">Transparência</p>
+  <h2>Os dois erros recentes — e o que fizemos com eles</h2>
+  <p class="section-intro">Um agente maduro não é o que nunca erra: é o que tem cada erro diagnosticado, corrigido e travado para não se repetir. Os dois casos abaixo foram identificados no painel, corrigidos na causa raiz e estão em produção desde 11/08/2026.</p>
+
+  <div class="incident">
+    <header>
+      <div>
+        <h3>A despedida em três idiomas</h3>
+        <div class="date">04/08/2026 · email ao Ristorante Al Moro, Roma</div>
+      </div>
+      <span class="status fixed">Corrigido · em produção</span>
+    </header>
+    <dl class="facts">
+      <div>
+        <dt>O que houve</dt>
+        <dd>O corpo do email saiu em italiano impecável — mas a despedida misturou espanhol e francês, com a autocorreção à mostra:<br><span class="bad-sample">"Con mucho gusto — mi correggo: Avec plaisir,"</span></dd>
+      </div>
+      <div>
+        <dt>Por quê</dt>
+        <dd>A lista interna de despedidas cobria apenas quatro idiomas e era tratada como fechada. Sem opção em italiano, a Aria improvisou entre as que tinha — e hesitou por escrito.</dd>
+      </div>
+      <div>
+        <dt>A correção</dt>
+        <dd>Regra absoluta nova: uma mensagem, um único idioma — da saudação à assinatura. As despedidas passaram a ser traduzidas para o idioma do cliente, qualquer que seja ("Con piacere," em italiano), e o próprio rodapé do email ganhou versão italiana. Autocorreções nunca são enviadas.</dd>
+      </div>
+    </dl>
+  </div>
+
+  <div class="incident">
+    <header>
+      <div>
+        <h3>A anotação interna que virou email</h3>
+        <div class="date">09/08/2026 · email automático repetido de um restaurante</div>
+      </div>
+      <span class="status fixed">Corrigido · em produção</span>
+    </header>
+    <dl class="facts">
+      <div>
+        <dt>O que houve</dt>
+        <dd>Diante de mensagens automáticas repetidas, a Aria decidiu — corretamente — não responder. Mas a anotação que registrava essa decisão foi enviada ao remetente como um email da marca, em português:<br><span class="bad-sample">"[Resposta vazia — mensagem automática repetida, sem novo conteúdo a atender.]"</span></dd>
+      </div>
+      <div>
+        <dt>Por quê</dt>
+        <dd>A instrução mandava "responder com texto vazio" — algo que um modelo de linguagem praticamente nunca produz: ele narra a decisão. E o sistema enviava qualquer texto recebido como se fosse resposta ao cliente, sem distinguir mensagem de anotação.</dd>
+      </div>
+      <div>
+        <dt>A correção</dt>
+        <dd>Dupla camada. A Aria agora tem um sinal explícito de silêncio; e o servidor ganhou uma trava definitiva que intercepta qualquer anotação interna nos dois canais — mesmo que o modelo volte a escrevê-la, nada chega ao cliente, e o caso é registrado no painel para auditoria da equipe.</dd>
+      </div>
+    </dl>
+  </div>
+
+  <div class="closing">
+    <p>A Aria entrega, todos os dias e em todos os idiomas, o padrão de atendimento que define a The World Keys — pelo custo de um software.</p>
+    <div class="sig">Aria · The World Keys · 2026</div>
+  </div>
+</main>
+
+<!-- ═══════════════════════ FRANÇAIS ═══════════════════════ -->
+<main class="lang-fr" lang="fr">
+  <p class="eyebrow">Qui est Aria</p>
+  <h2>Une conciergerie qui ne ferme jamais</h2>
+  <p class="lede">Aria répond sur les deux canaux de The World Keys — WhatsApp et e-mail — 24 heures sur 24, tous les jours. Elle converse dans la langue de son interlocuteur, connaît chaque restaurant du catalogue, se souvient de chaque client et sait exactement quand un sujet doit passer à l'équipe. Tout ce qu'elle fait reste visible dans le tableau de bord, où chaque conversation peut être reprise par un humain en un clic.</p>
+
+  <div class="stats">
+    <div class="stat"><div class="n">2</div><div class="l">canaux couverts<br>WhatsApp et e-mail</div></div>
+    <div class="stat"><div class="n">5</div><div class="l">langues ces dernières semaines — pt · en · fr · it · ja</div></div>
+    <div class="stat"><div class="n">24/7</div><div class="l">sans file d'attente, sans astreinte, sans heures sup.</div></div>
+    <div class="stat"><div class="n">100%</div><div class="l">des conversations auditables dans le tableau de bord</div></div>
+  </div>
+
+  <p class="eyebrow">Conciergerie</p>
+  <h2>Ce qu'elle fait pour le client</h2>
+  <ul class="cap-list">
+    <li><strong>Recommande en spécialiste.</strong> Le client décrit l'occasion — « un endroit romantique avec vue », « une table pour conclure une affaire » — et elle ne suggère que des maisons de la sélection, avec le lien direct de réservation. Elle n'invente jamais un restaurant et ne renvoie jamais vers des plateformes tierces.</li>
+    <li><strong>Lit tout ce que le client envoie.</strong> Audio, photo et PDF. Devant la photo d'un menu, elle recommande des plats en les croisant avec les allergies et restrictions connues du client — et signale ce qu'il vaut mieux éviter.</li>
+    <li><strong>Règle la logistique du dîner.</strong> Adresse, plan, distance et heure de départ : « comptez environ 25 minutes jusqu'au restaurant — en partant à 19 h 25, vous arrivez à 20 h ».</li>
+    <li><strong>Se souvient de chacun.</strong> Préférences, allergies et historique sont conservés. À la conversation suivante, elle sait déjà que le client est végane, ou que la dernière réservation était un anniversaire — et personnalise sans rien redemander.</li>
+    <li><strong>Soigne l'après-expérience.</strong> Elle recueille les avis avec légèreté et enregistre tout pour que l'entreprise apprenne — note du restaurant, note de la plateforme, suggestions.</li>
+  </ul>
+
+  <p class="eyebrow">Support &amp; Opérations</p>
+  <h2>Ce qu'elle règle en coulisses</h2>
+  <ul class="cap-list">
+    <li><strong>Localise et confirme les réservations à l'instant</strong>, par leur code, et guide annulations et modifications par le parcours sécurisé du compte client — toujours avec les données exactes, jamais de mémoire.</li>
+    <li><strong>Accompagne les restaurants partenaires.</strong> Quand un restaurant répond à l'e-mail de notification au lieu d'utiliser le bouton officiel, elle remercie, explique la bonne marche à suivre dans sa langue et veille à ce que le client soit prévenu.</li>
+    <li><strong>Sait quand appeler un humain.</strong> Urgences, remboursements, demandes spéciales et questions formelles sont transmis à l'équipe avec une priorité et un délai annoncés au client — personne ne reste sans réponse ni échéance.</li>
+    <li><strong>Ignore le bruit avec discernement.</strong> Publicités, newsletters et rapports automatiques ne reçoivent aucune réponse : l'attention est réservée aux clients et partenaires réels.</li>
+  </ul>
+
+  <p class="eyebrow">Dans les mots d'Aria elle-même</p>
+  <h2>Exemples réels des dernières semaines</h2>
+  <p class="section-intro">Extraits de conversations réelles enregistrées dans le tableau de bord — contenu non retouché.</p>
+
+  <div class="quotes">
+    <div class="quote">
+      <div class="chips"><span class="chip lang">Japonais</span><span class="chip">E-mail</span></div>
+      <blockquote class="ja">ご予約のキャンセルは、お客様ご自身のアカウントページから行っていただくのが最も確実で安全な方法です。</blockquote>
+      <div class="ctx">Une cliente japonaise a demandé l'annulation d'une réservation à Rome. Aria a répondu intégralement en japonais formel, avec les données exactes de la réservation, et l'a guidée vers le parcours sécurisé.</div>
+    </div>
+    <div class="quote">
+      <div class="chips"><span class="chip lang">Italien</span><span class="chip">E-mail</span></div>
+      <blockquote>Da quella pagina di gestione potete Accettare, Rifiutare oppure Proporre un nuovo orario: la piattaforma avviserà automaticamente il cliente.</blockquote>
+      <div class="ctx">Un restaurant de Rome a répondu à l'e-mail de notification en proposant un autre horaire. Aria l'a remercié et orienté, en italien, vers le bouton officiel qui règle tout immédiatement.</div>
+    </div>
+    <div class="quote">
+      <div class="chips"><span class="chip lang">Anglais</span><span class="chip">E-mail</span></div>
+      <blockquote>Simply open your Pending Request notification, click "Respond to Your Pending Requests," and select Accept — the guest will be informed right away.</blockquote>
+      <div class="ctx">Un restaurant d'Istanbul voulait confirmer une réservation en répondant à l'e-mail. Aria a confirmé les détails de la demande et montré le chemin qui prévient le client automatiquement.</div>
+    </div>
+    <div class="quote">
+      <div class="chips"><span class="chip lang">Anglais</span><span class="chip">E-mail</span></div>
+      <blockquote>Please rest assured that a request of this nature is treated by us as a formal matter, not a routine enquiry.</blockquote>
+      <div class="ctx">Une société portugaise a contesté formellement une page de la plateforme. Aria a mesuré la gravité, demandé les bons documents et transmis à l'équipe commerciale avec un délai d'un jour ouvré.</div>
+    </div>
+    <div class="quote">
+      <div class="chips"><span class="chip lang">Anglais</span><span class="chip">E-mail</span></div>
+      <blockquote>I have located your reservation: EK7PDGMC — Casa do Prego, Lagos. Once cancelled, the update is reflected instantly and the restaurant is notified automatically.</blockquote>
+      <div class="ctx">Un client demandait de l'aide pour une annulation au Portugal. Aria a localisé la réservation, confirmé chaque détail et l'a accompagné jusqu'au bout — sans transférer à personne.</div>
+    </div>
+    <div class="quote">
+      <div class="chips"><span class="chip lang">Portugais</span><span class="chip">WhatsApp</span></div>
+      <blockquote>Parece que sua mensagem foi enviada ao contato errado. Se algum dia eu puder ajudá-lo a descobrir ou reservar uma mesa em restaurantes especiais, será um prazer.</blockquote>
+      <div class="ctx">Quelqu'un a envoyé une commande de pizza par erreur au numéro de la plateforme. Aria a dissipé le malentendu avec élégance — en laissant la porte ouverte.</div>
+    </div>
+  </div>
+
+  <p class="eyebrow">Confiance</p>
+  <h2>Les limites qui la protègent — et protègent la marque</h2>
+  <div class="trust">
+    <div>
+      <h3>Ne demande jamais de données sensibles</h3>
+      <p>Ni carte bancaire, ni documents. Les réservations sont toujours finalisées par le client sur la plateforme ; Aria ne peut rien créer ni annuler seule.</p>
+    </div>
+    <div>
+      <h3>N'invente jamais</h3>
+      <p>Elle n'affirme que ce qui figure dans la base de l'entreprise. Sans information, elle vérifie et sollicite l'équipe — jamais de remboursement ni de remise promis au nom de TWK.</p>
+    </div>
+    <div>
+      <h3>Discrétion absolue</h3>
+      <p>Les incidents techniques se règlent en silence : le client ne lit jamais « erreur », « système » ou « panne ». L'expérience reste impeccable même quand quelque chose échoue en interne.</p>
+    </div>
+    <div>
+      <h3>Supervision humaine en un clic</h3>
+      <p>Chaque conversation, décision et escalade apparaît dans le tableau de bord en temps réel. N'importe qui dans l'équipe peut reprendre une conversation à tout moment — Aria se tait aussitôt.</p>
+    </div>
+  </div>
+
+  <p class="eyebrow">Transparence</p>
+  <h2>Les deux erreurs récentes — et ce que nous en avons fait</h2>
+  <p class="section-intro">Un agent mûr n'est pas celui qui ne se trompe jamais : c'est celui dont chaque erreur est diagnostiquée, corrigée et verrouillée pour ne plus se reproduire. Les deux cas ci-dessous ont été repérés dans le tableau de bord, corrigés à la racine et sont en production depuis le 11/08/2026.</p>
+
+  <div class="incident">
+    <header>
+      <div>
+        <h3>L'adieu en trois langues</h3>
+        <div class="date">04/08/2026 · e-mail au Ristorante Al Moro, Rome</div>
+      </div>
+      <span class="status fixed">Corrigé · en production</span>
+    </header>
+    <dl class="facts">
+      <div>
+        <dt>Ce qui s'est passé</dt>
+        <dd>Le corps de l'e-mail était en italien impeccable — mais la formule de clôture a mêlé espagnol et français, autocorrection incluse :<br><span class="bad-sample">« Con mucho gusto — mi correggo: Avec plaisir, »</span></dd>
+      </div>
+      <div>
+        <dt>Pourquoi</dt>
+        <dd>La liste interne des formules de clôture ne couvrait que quatre langues et était traitée comme fermée. Sans option en italien, Aria a improvisé parmi celles qu'elle avait — et a hésité par écrit.</dd>
+      </div>
+      <div>
+        <dt>La correction</dt>
+        <dd>Nouvelle règle absolue : un message, une seule langue — de la salutation à la signature. Les formules de clôture sont désormais traduites dans la langue du client, quelle qu'elle soit (« Con piacere, » en italien), et le pied de page de l'e-mail existe maintenant en italien. Les autocorrections ne partent jamais.</dd>
+      </div>
+    </dl>
+  </div>
+
+  <div class="incident">
+    <header>
+      <div>
+        <h3>La note interne devenue e-mail</h3>
+        <div class="date">09/08/2026 · e-mail automatique répété d'un restaurant</div>
+      </div>
+      <span class="status fixed">Corrigé · en production</span>
+    </header>
+    <dl class="facts">
+      <div>
+        <dt>Ce qui s'est passé</dt>
+        <dd>Face à des messages automatiques répétés, Aria a décidé — à juste titre — de ne pas répondre. Mais la note qui consignait cette décision a été envoyée à l'expéditeur comme un e-mail de la marque, en portugais :<br><span class="bad-sample">« [Resposta vazia — mensagem automática repetida, sem novo conteúdo a atender.] »</span></dd>
+      </div>
+      <div>
+        <dt>Pourquoi</dt>
+        <dd>La consigne demandait de « répondre par un texte vide » — ce qu'un modèle de langage ne produit pratiquement jamais : il raconte sa décision. Et le système envoyait tout texte reçu comme s'il s'agissait d'une réponse au client, sans distinguer message et annotation.</dd>
+      </div>
+      <div>
+        <dt>La correction</dt>
+        <dd>Double verrou. Aria dispose désormais d'un signal explicite de silence ; et le serveur intercepte définitivement toute note interne sur les deux canaux — même si le modèle en écrivait une à nouveau, rien ne parvient au client, et le cas est consigné dans le tableau de bord pour audit de l'équipe.</dd>
+      </div>
+    </dl>
+  </div>
+
+  <div class="closing">
+    <p>Aria offre, chaque jour et dans toutes les langues, le standard de service qui définit The World Keys — pour le coût d'un logiciel.</p>
+    <div class="sig">Aria · The World Keys · 2026</div>
+  </div>
+</main>
+
+<script>
+  (function () {
+    var root = document.documentElement;
+    var buttons = document.querySelectorAll(".lang-btn");
+    function setLang(lang) {
+      root.setAttribute("data-lang", lang);
+      root.setAttribute("lang", lang === "fr" ? "fr" : "pt-BR");
+      buttons.forEach(function (b) {
+        b.setAttribute("aria-pressed", b.getAttribute("data-lang") === lang ? "true" : "false");
+      });
+      try { localStorage.setItem("aria-page-lang", lang); } catch (e) {}
+    }
+    buttons.forEach(function (b) {
+      b.addEventListener("click", function () { setLang(b.getAttribute("data-lang")); });
+    });
+    var saved = "pt";
+    try { saved = localStorage.getItem("aria-page-lang") || "pt"; } catch (e) {}
+    setLang(saved === "fr" ? "fr" : "pt");
+  })();
+</script>
+
+</body>
+</html>

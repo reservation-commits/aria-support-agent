@@ -1,0 +1,492 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Aria · Catálogo de Testes · The World Keys</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{ --gold:#d4a857;--gold-soft:#e9c97a;--gold-deep:#b8893f;--ink:#08080a;--ink-2:#101015;--ink-3:#17171e;--ink-4:#1f1f28;--line:#26262f;--line-2:#33333f;--text:#f0f0f2;--text-2:#9a9aa6;--text-3:#6b6b76;--green:#34d399;--red:#fb7185;--violet:#8b5cf6;}
+  *{-webkit-tap-highlight-color:transparent;box-sizing:border-box;}
+  html,body{background:var(--ink);color:var(--text);font-family:'Inter',system-ui,sans-serif;-webkit-font-smoothing:antialiased;margin:0;}
+  .serif{font-family:'Fraunces',Georgia,serif;font-weight:300;letter-spacing:-.01em;}
+  .mono{font-family:'JetBrains Mono',monospace;}
+  .aurora{position:fixed;inset:0;z-index:-2;overflow:hidden;}
+  .aurora::before,.aurora::after{content:'';position:absolute;width:60vw;height:60vw;border-radius:50%;filter:blur(90px);opacity:.15;}
+  .aurora::before{background:radial-gradient(circle,#d4a857,transparent 65%);top:-15vw;left:-10vw;animation:d1 24s ease-in-out infinite;}
+  .aurora::after{background:radial-gradient(circle,#8b5cf6,transparent 65%);bottom:-20vw;right:-10vw;animation:d2 30s ease-in-out infinite;}
+  @keyframes d1{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(8vw,6vh) scale(1.15)}}
+  @keyframes d2{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(-6vw,-8vh) scale(1.2)}}
+  .grid-ov{position:fixed;inset:0;z-index:-1;background-image:linear-gradient(rgba(255,255,255,.015) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.015) 1px,transparent 1px);background-size:42px 42px;mask-image:radial-gradient(ellipse 80% 60% at 50% 0%,#000 30%,transparent 75%);}
+  .glass{background:linear-gradient(180deg,rgba(23,23,30,.72),rgba(16,16,21,.72));backdrop-filter:blur(16px);border:1px solid var(--line);}
+  .card{background:linear-gradient(180deg,rgba(23,23,30,.6),rgba(16,16,21,.55));border:1px solid var(--line);border-radius:16px;}
+  .gold-text{background:linear-gradient(110deg,#e9c97a,#d4a857);-webkit-background-clip:text;background-clip:text;color:transparent;}
+  .chip{display:inline-flex;align-items:center;gap:5px;padding:2.5px 10px;border-radius:999px;font-size:11px;font-weight:500;}
+  .chip-crit{background:rgba(251,113,133,.14);color:#fda4af;}
+  .chip-gold{background:rgba(212,168,87,.15);color:var(--gold-soft);}
+  .chip-ok{background:rgba(52,211,153,.14);color:#6ee7b7;}
+  .sec-head{cursor:pointer;transition:background .15s,border-color .2s;}
+  .sec-head:hover{background:rgba(255,255,255,.03);}
+  .sec-body{display:none;}
+  .sec-open .sec-body{display:block;animation:fade .25s ease;}
+  .sec-open .chev{transform:rotate(90deg);}
+  .chev{transition:transform .2s;color:var(--text-3);}
+  @keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+  .bubble{background:var(--ink-4);border:1px solid var(--line);border-radius:14px;border-bottom-left-radius:4px;}
+  .btn{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:9px;font-size:12px;font-weight:500;cursor:pointer;border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--text-2);transition:all .15s;}
+  .btn:hover{background:rgba(255,255,255,.09);color:var(--text);}
+  .btn-ok.on{background:rgba(52,211,153,.18);border-color:rgba(52,211,153,.4);color:#6ee7b7;}
+  .btn-no.on{background:rgba(251,113,133,.18);border-color:rgba(251,113,133,.4);color:#fda4af;}
+  .btn-gold{background:linear-gradient(135deg,rgba(233,201,122,.2),rgba(184,137,63,.12));border-color:rgba(212,168,87,.4);color:var(--gold-soft);}
+  .btn-gold:hover{background:linear-gradient(135deg,rgba(233,201,122,.3),rgba(184,137,63,.2));color:#fff;}
+  .note{width:100%;margin-top:8px;padding:8px 10px;border-radius:9px;background:rgba(255,255,255,.03);border:1px solid var(--line);color:var(--text);font-size:13px;font-family:inherit;resize:vertical;}
+  .note:focus{border-color:rgba(212,168,87,.4);outline:none;}
+  .lang{cursor:pointer;padding:5px 12px;border-radius:8px;font-size:12px;font-weight:600;border:1px solid var(--line);color:var(--text-2);}
+  .lang.on{background:linear-gradient(135deg,rgba(233,201,122,.2),rgba(184,137,63,.12));border-color:rgba(212,168,87,.4);color:var(--gold-soft);}
+  .prog-track{height:8px;border-radius:999px;background:rgba(255,255,255,.06);overflow:hidden;}
+  .prog-fill{height:8px;border-radius:999px;background:linear-gradient(90deg,#34d399,#6ee7b7);transition:width .4s;}
+  ::-webkit-scrollbar{width:8px;height:8px}::-webkit-scrollbar-thumb{background:#2f2f3a;border-radius:6px}
+</style>
+</head>
+<body class="min-h-screen">
+<div class="aurora"></div><div class="grid-ov"></div>
+
+<header class="glass sticky top-0 z-30 border-b">
+  <div class="max-w-[980px] mx-auto px-5 py-3 flex items-center justify-between gap-3">
+    <div class="flex items-center gap-3">
+      <div class="w-9 h-9 rounded-xl flex items-center justify-center font-bold text-lg serif" style="background:linear-gradient(135deg,var(--gold-soft),var(--gold-deep));color:#15110a">K</div>
+      <div>
+        <div class="text-sm font-semibold leading-tight" data-i="title">Catálogo de Testes</div>
+        <div class="text-[10px] tracking-wide" style="color:var(--text-3)">ARIA · THE WORLD KEYS</div>
+      </div>
+    </div>
+    <div class="flex items-center gap-2">
+      <span class="lang on" data-lang="pt" onclick="setLang('pt')">PT</span>
+      <span class="lang" data-lang="fr" onclick="setLang('fr')">FR</span>
+    </div>
+  </div>
+</header>
+
+<main class="max-w-[980px] mx-auto px-5 py-7">
+  <div class="mb-6">
+    <h1 class="serif text-3xl mb-1" data-i="h1">Catálogo de Testes da Aria</h1>
+    <p class="text-sm" style="color:var(--text-2)" data-i="sub">Verificação completa das principais funções — envie cada mensagem para o número da Aria no WhatsApp e compare com o resultado esperado.</p>
+  </div>
+
+  <!-- progress -->
+  <div class="card p-4 mb-5">
+    <div class="flex justify-between text-xs mb-2" style="color:var(--text-2)">
+      <span data-i="progress">Progresso de aprovação</span>
+      <span><b id="okCount" class="gold-text">0</b> / <span id="totalCount">0</span> · <span id="failCount" style="color:var(--red)">0</span> <span data-i="failLbl">falha(s)</span></span>
+    </div>
+    <div class="prog-track"><div class="prog-fill" id="progFill" style="width:0%"></div></div>
+    <div class="flex gap-2 mt-3">
+      <button class="btn" onclick="expandAll(true)" data-i="expand">Abrir tudo</button>
+      <button class="btn" onclick="expandAll(false)" data-i="collapse">Fechar tudo</button>
+      <button class="btn" onclick="resetAll()" data-i="reset">Limpar marcações</button>
+    </div>
+  </div>
+
+  <div id="sections" class="space-y-3"></div>
+
+  <!-- Relatório de falhas -->
+  <div class="card p-5 mt-6">
+    <div class="flex items-center justify-between gap-3 flex-wrap">
+      <div>
+        <div class="font-medium text-sm" data-i="reportHead">Relatório de falhas</div>
+        <div class="text-[11px]" style="color:var(--text-3)" data-i="reportDesc"></div>
+      </div>
+      <button class="btn btn-gold" onclick="genReport()" data-i="genReport">Gerar relatório de falhas</button>
+    </div>
+    <div id="reportArea" style="display:none" class="mt-4">
+      <textarea id="reportText" readonly class="mono" style="width:100%;min-height:220px;padding:12px;border-radius:10px;background:rgba(0,0,0,.3);border:1px solid var(--line);color:var(--text);font-size:12px;"></textarea>
+      <div class="flex gap-2 mt-2">
+        <button class="btn btn-gold" onclick="copyReport()" data-i="copyReport">Copiar relatório</button>
+        <button class="btn" onclick="downloadReport()" data-i="downloadReport">Baixar .txt</button>
+      </div>
+      <div class="text-[11px] mt-2" style="color:var(--green)" id="reportHint"></div>
+    </div>
+    <div id="reportEmpty" class="text-[12px] mt-3" style="display:none;color:var(--text-3)"></div>
+  </div>
+
+  <p class="text-[11px] text-center mt-8" style="color:var(--text-3)" data-i="foot">As marcações ficam salvas neste navegador. Lembretes (2h antes) e convites de avaliação (6h depois) são proativos/agendados — não dá para disparar manualmente por aqui.</p>
+</main>
+
+<script>
+// ── UI strings ────────────────────────────────────────────────────────────────
+const UI = {
+  pt:{ title:"Catálogo de Testes", h1:"Catálogo de Testes da Aria",
+    sub:"Verificação completa das principais funções — envie cada mensagem para o número da Aria no WhatsApp e compare com o resultado esperado.",
+    progress:"Progresso de aprovação", failLbl:"falha(s)", expand:"Abrir tudo", collapse:"Fechar tudo", reset:"Limpar marcações",
+    send:"Mensagem para enviar", expect:"Resultado esperado (aprovado se)", ok:"Aprovado", no:"Falhou", copy:"Copiar", copied:"Copiado!", seq:"Sequência",
+    foot:"As marcações ficam salvas neste navegador. Lembretes (2h antes) e convites de avaliação (6h depois) são proativos/agendados — não dá para disparar manualmente por aqui.",
+    notePh:"Observação: o que o agente respondeu de errado neste teste?",
+    reportHead:"Relatório de falhas", reportDesc:"Gere o log detalhado das falhas marcadas para enviar ao agente corrigir.",
+    genReport:"Gerar relatório de falhas", copyReport:"Copiar relatório", downloadReport:"Baixar .txt",
+    reportEmpty:"Nenhuma falha marcada. Marque os testes que falharam (✗) para gerar o relatório.",
+    reportTitle:"RELATÓRIO DE FALHAS — Aria · The World Keys", sent2:"Mensagem enviada", expected2:"Esperado", observed:"O que aconteceu",
+    sendHint:"Relatório copiado! Cole na conversa com o agente (aqui no chat) para a correção.", failWord:"falha(s)" },
+  fr:{ title:"Catalogue de Tests", h1:"Catalogue de Tests d'Aria",
+    sub:"Vérification complète des principales fonctions — envoyez chaque message au numéro WhatsApp d'Aria et comparez au résultat attendu.",
+    progress:"Progression d'approbation", failLbl:"échec(s)", expand:"Tout ouvrir", collapse:"Tout fermer", reset:"Effacer les marques",
+    send:"Message à envoyer", expect:"Résultat attendu (approuvé si)", ok:"Approuvé", no:"Échoué", copy:"Copier", copied:"Copié !", seq:"Séquence",
+    foot:"Les marques sont enregistrées dans ce navigateur. Les rappels (2h avant) et invitations d'évaluation (6h après) sont proactifs/planifiés — impossible de les déclencher manuellement ici.",
+    notePh:"Remarque : qu'est-ce que l'agent a mal répondu à ce test ?",
+    reportHead:"Rapport d'échecs", reportDesc:"Générez le journal détaillé des échecs marqués à envoyer à l'agent pour correction.",
+    genReport:"Générer le rapport d'échecs", copyReport:"Copier le rapport", downloadReport:"Télécharger .txt",
+    reportEmpty:"Aucun échec marqué. Marquez les tests échoués (✗) pour générer le rapport.",
+    reportTitle:"RAPPORT D'ÉCHECS — Aria · The World Keys", sent2:"Message envoyé", expected2:"Attendu", observed:"Ce qui s'est passé",
+    sendHint:"Rapport copié ! Collez-le dans la conversation avec l'agent (ici dans le chat) pour la correction.", failWord:"échec(s)" }
+};
+
+// ── Catálogo (cada teste: q = mensagem a enviar, e = resultado esperado) ───────
+const SECTIONS = [
+  { id:"inicio", icon:"◇", crit:false,
+    t:{pt:"Início, saudação e idioma", fr:"Début, salutation et langue"},
+    d:{pt:"Primeiro contato e detecção de idioma", fr:"Premier contact et détection de langue"},
+    tests:[
+      { q:{pt:"Olá", fr:"Bonjour"},
+        e:{pt:"Apresenta-se como Aria, com elegância e sem emoji; carrega o perfil do cliente em silêncio; responde no mesmo idioma.",
+           fr:"Se présente comme Aria, avec élégance et sans emoji ; charge le profil du client en silence ; répond dans la même langue."} },
+      { q:{pt:"Hi! Can you help me?", fr:"Hi! Can you help me?"},
+        e:{pt:"Responde em INGLÊS (espelha o idioma da mensagem), com tom acolhedor.",
+           fr:"Répond en ANGLAIS (reflète la langue du message), avec un ton accueillant."} },
+    ]},
+
+  { id:"reserva", icon:"◐", crit:true,
+    t:{pt:"Nova reserva — entrega da URL", fr:"Nouvelle réservation — URL exacte"},
+    d:{pt:"O ponto mais crítico: entregar a URL correta, nunca mandar buscar", fr:"Le point le plus critique : livrer l'URL correcte, ne jamais demander de chercher"},
+    tests:[
+      { q:{pt:"Quero reservar uma mesa no Contraste, em Milão", fr:"Je veux réserver une table au Contraste, à Milan"},
+        e:{pt:"Apresenta o restaurante e ENTREGA a URL exata (theworldkeys.com/restaurant/…), sozinha numa linha. NUNCA diz para 'buscar pelo nome' nem 'procurar na plataforma'.",
+           fr:"Présente le restaurant et LIVRE l'URL exacte (theworldkeys.com/restaurant/…), seule sur une ligne. Ne dit JAMAIS de « chercher par le nom » ni « chercher sur la plateforme »."} },
+      { q:{pt:"Como faço para reservar no Le Bernardin?", fr:"Comment réserver au Le Bernardin ?"},
+        e:{pt:"Mesma regra: link clicável correto da página do restaurante. Não inventa URL.",
+           fr:"Même règle : lien cliquable correct de la page du restaurant. N'invente pas d'URL."} },
+      { q:{pt:"Quero reservar (cite um restaurante sem link cadastrado, se houver)", fr:"Je veux réserver (citez un restaurant sans lien enregistré, le cas échéant)"},
+        e:{pt:"Se não houver URL, NÃO manda o cliente buscar: diz que está providenciando o link oficial e escala. Jamais inventa um endereço web.",
+           fr:"S'il n'y a pas d'URL, ne demande PAS au client de chercher : dit qu'il prépare le lien officiel et escalade. N'invente jamais d'adresse web."} },
+    ]},
+
+  { id:"descoberta", icon:"✦", crit:false,
+    t:{pt:"Descoberta por vibe/ocasião", fr:"Découverte par ambiance/occasion"},
+    d:{pt:"Recomendação inteligente por linguagem natural", fr:"Recommandation intelligente en langage naturel"},
+    tests:[
+      { q:{pt:"Quero um lugar romântico com vista para jantar com minha esposa", fr:"Je cherche un endroit romantique avec vue pour dîner avec ma femme"},
+        e:{pt:"Usa a descoberta por relevância e sugere 3 a 5 restaurantes da TWK alinhados à vibe, com link de cada. NUNCA cita restaurante fora da plataforma.",
+           fr:"Utilise la découverte par pertinence et propose 3 à 5 restaurants TWK adaptés à l'ambiance, avec le lien de chacun. Ne cite JAMAIS un restaurant hors plateforme."} },
+      { q:{pt:"Algo animado e descontraído para ir com amigos", fr:"Quelque chose d'animé et décontracté pour sortir entre amis"},
+        e:{pt:"Sugestões coerentes com o pedido, curtas e elegantes, todas do catálogo.",
+           fr:"Suggestions cohérentes avec la demande, courtes et élégantes, toutes du catalogue."} },
+    ]},
+
+  { id:"perto", icon:"◉", crit:false,
+    t:{pt:"Aberto agora perto de você", fr:"Ouvert maintenant près de vous"},
+    d:{pt:"Localização + horário em tempo real", fr:"Localisation + horaires en temps réel"},
+    tests:[
+      { seq:true, q:{pt:"1) Compartilhe sua localização (pin do WhatsApp)  2) Escreva: O que está aberto agora pertinho?",
+                     fr:"1) Partagez votre localisation (épingle WhatsApp)  2) Écrivez : Qu'est-ce qui est ouvert maintenant tout près ?"},
+        e:{pt:"Lista restaurantes próximos ABERTOS AGORA, com distância e horário de fechar. Só restaurantes da plataforma. Oferece o link de reserva.",
+           fr:"Liste les restaurants proches OUVERTS MAINTENANT, avec distance et heure de fermeture. Uniquement des restaurants de la plateforme. Propose le lien de réservation."} },
+    ]},
+
+  { id:"foto-rec", icon:"📷", crit:false,
+    t:{pt:"Recomendação por foto", fr:"Recommandation par photo"},
+    d:{pt:"Cliente manda foto de um prato/ambiente", fr:"Le client envoie une photo d'un plat/ambiance"},
+    tests:[
+      { seq:true, q:{pt:"Envie uma foto de um prato ou ambiente bonito + escreva: quero um lugar assim",
+                     fr:"Envoyez une photo d'un plat ou d'une ambiance + écrivez : je veux un endroit comme ça"},
+        e:{pt:"Descreve a vibe que percebeu na foto e sugere restaurantes TWK parecidos, com link. Nunca diz que 'não vê a imagem'.",
+           fr:"Décrit l'ambiance perçue dans la photo et propose des restaurants TWK similaires, avec lien. Ne dit jamais qu'il « ne voit pas l'image »."} },
+    ]},
+
+  { id:"cardapio", icon:"📋", crit:true,
+    t:{pt:"Cardápio na foto + alergias", fr:"Menu en photo + allergies"},
+    d:{pt:"Segurança alimentar — cruzamento com o perfil", fr:"Sécurité alimentaire — croisement avec le profil"},
+    tests:[
+      { seq:true, q:{pt:"1) Diga: sou alérgico a frutos do mar  2) Envie a foto de um cardápio que tenha algum prato com frutos do mar",
+                     fr:"1) Dites : je suis allergique aux fruits de mer  2) Envoyez la photo d'un menu contenant un plat aux fruits de mer"},
+        e:{pt:"Lê os pratos, ALERTA claramente os que conflitam com a alergia, destaca opções seguras e recomenda confirmar o preparo com o restaurante. Nunca garante 100% pela foto.",
+           fr:"Lit les plats, ALERTE clairement ceux en conflit avec l'allergie, met en avant les options sûres et recommande de confirmer la préparation avec le restaurant. Ne garantit jamais à 100% par la photo."} },
+    ]},
+
+  { id:"local", icon:"🗺", crit:false,
+    t:{pt:"Localização e endereço", fr:"Localisation et adresse"},
+    d:{pt:"Onde fica / como chegar", fr:"Où se trouve / comment y aller"},
+    tests:[
+      { q:{pt:"Onde fica o Contraste?", fr:"Où se trouve le Contraste ?"},
+        e:{pt:"Devolve o endereço e um link clicável do Google Maps (sempre entrega um link válido).",
+           fr:"Renvoie l'adresse et un lien cliquable Google Maps (livre toujours un lien valide)."} },
+    ]},
+
+  { id:"eta", icon:"🚗", crit:false,
+    t:{pt:"Saia agora (ETA até a reserva)", fr:"Partir maintenant (ETA vers la réservation)"},
+    d:{pt:"A que horas sair para chegar no horário", fr:"À quelle heure partir pour arriver à l'heure"},
+    tests:[
+      { seq:true, q:{pt:"1) Compartilhe sua localização  2) Escreva: minha reserva é às 20h, a que horas devo sair?",
+                     fr:"1) Partagez votre localisation  2) Écrivez : ma réservation est à 20h, à quelle heure dois-je partir ?"},
+        e:{pt:"Informa o tempo de viagem e sugere a hora de sair (com margem), além do link da rota. Se o trânsito não estiver disponível, orienta sem inventar números.",
+           fr:"Indique le temps de trajet et suggère l'heure de départ (avec marge), plus le lien d'itinéraire. Si le trafic est indisponible, conseille sans inventer de chiffres."} },
+    ]},
+
+  { id:"confirmar", icon:"✓", crit:false,
+    t:{pt:"Consulta / confirmação de reserva", fr:"Consultation / confirmation de réservation"},
+    d:{pt:"Mostrar que conhece a reserva", fr:"Montrer qu'il connaît la réservation"},
+    tests:[
+      { q:{pt:"Pode confirmar minha reserva? Código TWK-XXXXXXXX (use um código real)", fr:"Pouvez-vous confirmer ma réservation ? Code TWK-XXXXXXXX (utilisez un vrai code)"},
+        e:{pt:"Localiza e confirma restaurante, data/horário, pessoas e status. Lembra com delicadeza que ele acompanha tudo na conta (theworldkeys.com/users/reservations).",
+           fr:"Localise et confirme le restaurant, la date/heure, le nombre de personnes et le statut. Rappelle avec délicatesse qu'il suit tout dans son compte (theworldkeys.com/users/reservations)."} },
+      { q:{pt:"Tenho uma reserva no [restaurante] amanhã, está tudo certo?", fr:"J'ai une réservation au [restaurant] demain, tout est bon ?"},
+        e:{pt:"Busca por pistas (nome/data) quando não há código e confirma os dados encontrados.",
+           fr:"Recherche par indices (nom/date) sans code et confirme les données trouvées."} },
+    ]},
+
+  { id:"cancelar", icon:"⊘", crit:true,
+    t:{pt:"Cancelamento de reserva", fr:"Annulation de réservation"},
+    d:{pt:"Sempre direcionar para a conta do cliente", fr:"Toujours rediriger vers le compte du client"},
+    tests:[
+      { q:{pt:"Quero cancelar minha reserva", fr:"Je veux annuler ma réservation"},
+        e:{pt:"NÃO cancela pelo chat. Direciona, com cuidado e como o caminho mais seguro, para theworldkeys.com/users/reservations (cancelar pelo card da reserva). Tom acolhedor, nunca recusa seca.",
+           fr:"N'annule PAS via le chat. Redirige, avec soin et comme la voie la plus sûre, vers theworldkeys.com/users/reservations (annuler depuis la carte de réservation). Ton accueillant, jamais un refus sec."} },
+    ]},
+
+  { id:"horario", icon:"🕐", crit:false,
+    t:{pt:"Validação de horário de funcionamento", fr:"Validation des horaires d'ouverture"},
+    d:{pt:"Não mandar reservar quando está fechado", fr:"Ne pas envoyer réserver quand c'est fermé"},
+    tests:[
+      { q:{pt:"Quero reservar no [restaurante] na segunda às 23h", fr:"Je veux réserver au [restaurant] lundi à 23h"},
+        e:{pt:"Confere os horários; se fechado nesse dia/horário, avisa com elegância ANTES do link e oferece os horários reais de funcionamento.",
+           fr:"Vérifie les horaires ; si fermé ce jour/heure, prévient avec élégance AVANT le lien et propose les horaires réels d'ouverture."} },
+    ]},
+
+  { id:"reembolso", icon:"!", crit:true,
+    t:{pt:"Reembolso / disputa financeira", fr:"Remboursement / litige financier"},
+    d:{pt:"Sempre escalar, nunca prometer", fr:"Toujours escalader, ne jamais promettre"},
+    tests:[
+      { q:{pt:"Fui cobrado de forma errada e quero reembolso agora!", fr:"J'ai été facturé à tort et je veux un remboursement maintenant !"},
+        e:{pt:"Acolhe com empatia, ESCALA para a equipe humana e comunica o próximo passo e o prazo. NUNCA promete reembolso/valor em nome da TWK.",
+           fr:"Accueille avec empathie, ESCALADE vers l'équipe humaine et communique l'étape suivante et le délai. Ne promet JAMAIS de remboursement/montant au nom de TWK."} },
+    ]},
+
+  { id:"humano", icon:"☎", crit:false,
+    t:{pt:"Pedido de atendimento humano", fr:"Demande d'assistance humaine"},
+    d:{pt:"Escalar imediatamente", fr:"Escalader immédiatement"},
+    tests:[
+      { q:{pt:"Quero falar com um atendente humano", fr:"Je veux parler à un agent humain"},
+        e:{pt:"Escala imediatamente, sem insistir nem redirecionar, e informa o próximo passo/prazo.",
+           fr:"Escalade immédiatement, sans insister ni rediriger, et indique l'étape suivante/le délai."} },
+    ]},
+
+  { id:"perfil", icon:"♥", crit:false,
+    t:{pt:"Preferências e memória", fr:"Préférences et mémoire"},
+    d:{pt:"Aprende e lembra do cliente", fr:"Apprend et se souvient du client"},
+    tests:[
+      { seq:true, q:{pt:"1) Diga: sou vegetariano e amo comida japonesa  2) Em seguida: me recomenda um lugar",
+                     fr:"1) Dites : je suis végétarien et j'adore la cuisine japonaise  2) Ensuite : recommandez-moi un endroit"},
+        e:{pt:"Salva as preferências em silêncio e recomenda algo alinhado (japonês/vegetariano). Numa conversa futura, deve lembrar disso.",
+           fr:"Enregistre les préférences en silence et recommande quelque chose d'adapté (japonais/végétarien). Lors d'une conversation future, doit s'en souvenir."} },
+    ]},
+
+  { id:"optout", icon:"🔕", crit:false,
+    t:{pt:"Opt-out / opt-in de mensagens", fr:"Désinscription / réinscription des messages"},
+    d:{pt:"Respeitar o desejo de não receber", fr:"Respecter le souhait de ne pas recevoir"},
+    tests:[
+      { q:{pt:"PARAR", fr:"ARRÊTER"},
+        e:{pt:"Confirma que não receberá mais lembretes/convites de avaliação, no idioma do país do número. O atendimento normal continua disponível.",
+           fr:"Confirme qu'il ne recevra plus de rappels/invitations, dans la langue du pays du numéro. L'assistance normale reste disponible."} },
+      { q:{pt:"VOLTAR", fr:"REVENIR"},
+        e:{pt:"Reativa o envio das mensagens proativas e confirma de forma calorosa.",
+           fr:"Réactive l'envoi des messages proactifs et confirme chaleureusement."} },
+    ]},
+
+  { id:"midia", icon:"🎙", crit:false,
+    t:{pt:"Áudio e documentos (PDF)", fr:"Audio et documents (PDF)"},
+    d:{pt:"Entradas além de texto", fr:"Entrées au-delà du texte"},
+    tests:[
+      { q:{pt:"Envie um áudio dizendo um pedido (ex.: 'quero um japonês em Paris')", fr:"Envoyez un audio avec une demande (ex. : « je veux un japonais à Paris »)"},
+        e:{pt:"Entende o áudio (transcrição) e responde normalmente. Se a transcrição falhar, pede gentilmente o reenvio em texto, sem mencionar erro técnico.",
+           fr:"Comprend l'audio (transcription) et répond normalement. Si la transcription échoue, demande gentiment de renvoyer en texte, sans mentionner d'erreur technique."} },
+      { q:{pt:"Envie um PDF (ex.: um comprovante) e pergunte algo sobre ele", fr:"Envoyez un PDF (ex. : un justificatif) et posez une question dessus"},
+        e:{pt:"Lê o conteúdo do PDF e responde com base nele.",
+           fr:"Lit le contenu du PDF et répond en s'appuyant dessus."} },
+    ]},
+
+  { id:"avaliacao", icon:"★", crit:false,
+    t:{pt:"Avaliação pós-experiência", fr:"Évaluation post-visite"},
+    d:{pt:"Coleta de notas e tags (normalmente após o convite de 6h)", fr:"Collecte de notes et tags (normalement après l'invitation de 6h)"},
+    tests:[
+      { q:{pt:"Quero avaliar minha experiência no [restaurante]", fr:"Je veux évaluer mon expérience au [restaurant]"},
+        e:{pt:"Conduz uma coleta breve e calorosa: nota do estabelecimento e da plataforma (1-5), tags do que marcou, e sugestão de melhoria. Agradece e registra.",
+           fr:"Mène une collecte brève et chaleureuse : note de l'établissement et de la plateforme (1-5), tags de ce qui a marqué, et suggestion d'amélioration. Remercie et enregistre."} },
+    ]},
+
+  { id:"anti", icon:"⛨", crit:true,
+    t:{pt:"Anti-alucinação", fr:"Anti-hallucination"},
+    d:{pt:"Nunca inventa restaurante, URL ou dado", fr:"N'invente jamais de restaurant, d'URL ou de donnée"},
+    tests:[
+      { q:{pt:"Tem algum restaurante da TWK em Tóquio? (ou outra cidade sem cobertura)", fr:"Avez-vous un restaurant TWK à Tokyo ? (ou une autre ville sans couverture)"},
+        e:{pt:"Se não houver no catálogo, é honesta ('ainda não temos cobertura em …') e oferece alternativas. NUNCA inventa um restaurante nem uma URL.",
+           fr:"S'il n'y en a pas au catalogue, est honnête (« nous n'avons pas encore de couverture à … ») et propose des alternatives. N'invente JAMAIS un restaurant ni une URL."} },
+      { q:{pt:"Qual o telefone direto do chef? (dado que provavelmente não existe)", fr:"Quel est le téléphone direct du chef ? (donnée qui n'existe probablement pas)"},
+        e:{pt:"Não inventa. Diz que vai verificar / não tem essa informação e, se fizer sentido, escala.",
+           fr:"N'invente pas. Dit qu'il va vérifier / n'a pas cette information et, si pertinent, escalade."} },
+    ]},
+
+  { id:"forma", icon:"✎", crit:false,
+    t:{pt:"Formatação e tom (sem emoji)", fr:"Mise en forme et ton (sans emoji)"},
+    d:{pt:"Padrão visual do WhatsApp", fr:"Standard visuel WhatsApp"},
+    tests:[
+      { q:{pt:"(qualquer mensagem) — observe o estilo da resposta", fr:"(n'importe quel message) — observez le style de la réponse"},
+        e:{pt:"NUNCA usa emoji. Usa *negrito* e _itálico_ nativos do WhatsApp. Tom de concierge de luxo: caloroso, claro e conciso.",
+           fr:"N'utilise JAMAIS d'emoji. Utilise le *gras* et l'_italique_ natifs de WhatsApp. Ton de concierge de luxe : chaleureux, clair et concis."} },
+    ]},
+
+  { id:"rajada", icon:"⚡", crit:false,
+    t:{pt:"Mensagens em rajada", fr:"Messages en rafale"},
+    d:{pt:"Agrupar várias mensagens seguidas", fr:"Regrouper plusieurs messages d'affilée"},
+    tests:[
+      { seq:true, q:{pt:"Envie 3 mensagens bem rápidas, uma após a outra: 'oi' / 'quero reservar' / 'em Paris'",
+                     fr:"Envoyez 3 messages très rapidement, l'un après l'autre : « bonjour » / « je veux réserver » / « à Paris »"},
+        e:{pt:"Responde UMA vez só, considerando as três juntas (não dá 3 respostas desencontradas).",
+           fr:"Répond UNE seule fois, en tenant compte des trois ensemble (pas 3 réponses désordonnées)."} },
+    ]},
+
+  { id:"data", icon:"📅", crit:false,
+    t:{pt:"Datas relativas", fr:"Dates relatives"},
+    d:{pt:"Calcular 'amanhã', 'sexta que vem'", fr:"Calculer « demain », « vendredi prochain »"},
+    tests:[
+      { q:{pt:"Quero reservar para sexta que vem", fr:"Je veux réserver pour vendredi prochain"},
+        e:{pt:"Calcula a data exata corretamente e a confirma incluindo o dia da semana (ex.: 'sexta, 27 de junho'). Não usa data do passado para evento futuro.",
+           fr:"Calcule la date exacte correctement et la confirme en incluant le jour de la semaine (ex. : « vendredi 27 juin »). N'utilise pas une date passée pour un événement futur."} },
+    ]},
+];
+
+// ── Render ─────────────────────────────────────────────────────────────────────
+let LANG = localStorage.getItem("twk-cat-lang") || "pt";
+const store = (k,v)=>{ if(v===undefined) return localStorage.getItem(k); localStorage.setItem(k,v); };
+
+function tkey(s,i){ return "twk-test-"+s+"-"+i; }
+function noteKey(s,i){ return "twk-note-"+s+"-"+i; }
+function saveNote(sid,i,v){ store(noteKey(sid,i), v); }
+
+function render(){
+  const root = document.getElementById("sections");
+  root.innerHTML = "";
+  let total=0;
+  SECTIONS.forEach((s)=>{
+    total += s.tests.length;
+    const sec = document.createElement("div");
+    sec.className = "card overflow-hidden";
+    sec.id = "sec-"+s.id;
+    const tests = s.tests.map((t,i)=>{
+      const st = store(tkey(s.id,i)) || "";
+      const note = store(noteKey(s.id,i)) || "";
+      const seqBadge = t.seq ? `<span class="chip chip-gold mr-2">${UI[LANG].seq}</span>` : "";
+      return `<div class="p-4 border-t" style="border-color:var(--line)">
+        <div class="text-[10px] uppercase tracking-wider mb-1.5" style="color:var(--text-3)">${seqBadge}${UI[LANG].send}</div>
+        <div class="bubble p-3 flex items-start justify-between gap-3 mb-3">
+          <div class="text-sm whitespace-pre-line leading-relaxed flex-1">${esc(t.q[LANG])}</div>
+          <button class="btn shrink-0" onclick='copyMsg(this, ${JSON.stringify(t.q[LANG])})'>${UI[LANG].copy}</button>
+        </div>
+        <div class="text-[10px] uppercase tracking-wider mb-1" style="color:var(--text-3)">${UI[LANG].expect}</div>
+        <div class="text-sm leading-relaxed mb-3" style="color:var(--text-2)">${esc(t.e[LANG])}</div>
+        <div class="flex gap-2">
+          <button class="btn btn-ok ${st==='ok'?'on':''}" onclick="mark('${s.id}',${i},'ok')">✓ ${UI[LANG].ok}</button>
+          <button class="btn btn-no ${st==='fail'?'on':''}" onclick="mark('${s.id}',${i},'fail')">✗ ${UI[LANG].no}</button>
+        </div>
+        <textarea class="note" rows="2" placeholder="${UI[LANG].notePh}" oninput="saveNote('${s.id}',${i},this.value)">${esc(note)}</textarea>
+      </div>`;
+    }).join("");
+    sec.innerHTML = `
+      <div class="sec-head p-4 flex items-center justify-between gap-3" onclick="toggle('${s.id}')">
+        <div class="flex items-center gap-3 min-w-0">
+          <span class="text-xl w-6 text-center">${s.icon}</span>
+          <div class="min-w-0">
+            <div class="font-medium text-sm flex items-center gap-2 flex-wrap">${esc(s.t[LANG])} ${s.crit?`<span class="chip chip-crit">${LANG==='pt'?'CRÍTICO':'CRITIQUE'}</span>`:''}</div>
+            <div class="text-[11px] truncate" style="color:var(--text-3)">${esc(s.d[LANG])}</div>
+          </div>
+        </div>
+        <div class="flex items-center gap-3 shrink-0">
+          <span id="badge-${s.id}" class="text-[11px]" style="color:var(--text-3)"></span>
+          <span class="chev">›</span>
+        </div>
+      </div>
+      <div class="sec-body">${tests}</div>`;
+    root.appendChild(sec);
+    updateBadge(s);
+  });
+  document.getElementById("totalCount").textContent = total;
+  // restore open state
+  SECTIONS.forEach(s=>{ if(store("twk-open-"+s.id)==="1") document.getElementById("sec-"+s.id).classList.add("sec-open"); });
+  applyUI(); updateProgress();
+}
+
+function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+
+function toggle(id){ const el=document.getElementById("sec-"+id); el.classList.toggle("sec-open"); store("twk-open-"+id, el.classList.contains("sec-open")?"1":"0"); }
+function expandAll(open){ SECTIONS.forEach(s=>{ const el=document.getElementById("sec-"+s.id); el.classList.toggle("sec-open",open); store("twk-open-"+s.id,open?"1":"0"); }); }
+
+function mark(sid,i,val){ const k=tkey(sid,i); store(k, store(k)===val?"":val); render(); }
+
+function updateBadge(s){
+  let ok=0,fail=0; s.tests.forEach((_,i)=>{ const v=store(tkey(s.id,i)); if(v==="ok")ok++; else if(v==="fail")fail++; });
+  const b=document.getElementById("badge-"+s.id); if(!b) return;
+  if(fail>0) b.innerHTML = `<span style="color:var(--red)">✗ ${fail}</span>`;
+  else if(ok===s.tests.length) b.innerHTML = `<span style="color:var(--green)">✓ ${ok}/${s.tests.length}</span>`;
+  else b.textContent = `${ok}/${s.tests.length}`;
+}
+
+function updateProgress(){
+  let ok=0,fail=0,total=0;
+  SECTIONS.forEach(s=>s.tests.forEach((_,i)=>{ total++; const v=store(tkey(s.id,i)); if(v==="ok")ok++; else if(v==="fail")fail++; }));
+  document.getElementById("okCount").textContent=ok;
+  document.getElementById("failCount").textContent=fail;
+  document.getElementById("progFill").style.width=(total? (ok/total*100):0)+"%";
+}
+
+function resetAll(){ if(!confirm(LANG==='pt'?'Limpar todas as marcações?':'Effacer toutes les marques ?')) return;
+  SECTIONS.forEach(s=>s.tests.forEach((_,i)=>{ localStorage.removeItem(tkey(s.id,i)); localStorage.removeItem(noteKey(s.id,i)); }));
+  const area=document.getElementById("reportArea"); if(area) area.style.display="none"; render(); }
+
+function copyMsg(btn, txt){ navigator.clipboard?.writeText(txt).then(()=>{ const o=btn.textContent; btn.textContent=UI[LANG].copied; setTimeout(()=>btn.textContent=o,1200); }); }
+
+function genReport(){
+  const lines=[]; let n=0;
+  SECTIONS.forEach(s=>s.tests.forEach((t,i)=>{
+    if(store(tkey(s.id,i))==="fail"){
+      n++;
+      const note=(store(noteKey(s.id,i))||"").trim();
+      const crit = s.crit ? (LANG==='pt'?' (CRÍTICO)':' (CRITIQUE)') : '';
+      lines.push(`#${n} [${s.t[LANG]}]${crit}`);
+      lines.push(`${UI[LANG].sent2}: ${t.q[LANG]}`);
+      lines.push(`${UI[LANG].expected2}: ${t.e[LANG]}`);
+      lines.push(`${UI[LANG].observed}: ${note||'—'}`);
+      lines.push("");
+    }
+  }));
+  const area=document.getElementById("reportArea");
+  const empty=document.getElementById("reportEmpty");
+  if(n===0){ area.style.display="none"; empty.style.display="block"; empty.textContent=UI[LANG].reportEmpty; return; }
+  empty.style.display="none";
+  const loc = LANG==='pt'?'pt-BR':'fr-FR';
+  const header=`${UI[LANG].reportTitle}\n${new Date().toLocaleString(loc)} · ${n} ${UI[LANG].failWord}\nModelo testado: (informe aqui se souber)\n\n`;
+  document.getElementById("reportText").value=header+lines.join("\n");
+  document.getElementById("reportHint").textContent="";
+  area.style.display="block";
+}
+function copyReport(){ const ta=document.getElementById("reportText"); navigator.clipboard?.writeText(ta.value).then(()=>{ document.getElementById("reportHint").textContent=UI[LANG].sendHint; }); }
+function downloadReport(){ const ta=document.getElementById("reportText"); const blob=new Blob([ta.value],{type:"text/plain;charset=utf-8"}); const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download="aria-falhas-"+new Date().toISOString().slice(0,10)+".txt"; a.click(); }
+
+function setLang(l){ LANG=l; store("twk-cat-lang",l); document.documentElement.lang = l==='pt'?'pt-BR':'fr';
+  document.querySelectorAll(".lang").forEach(e=>e.classList.toggle("on", e.dataset.lang===l)); render(); }
+
+function applyUI(){ document.querySelectorAll("[data-i]").forEach(e=>{ const k=e.dataset.i; if(UI[LANG][k]!==undefined) e.textContent=UI[LANG][k]; }); }
+
+document.querySelectorAll(".lang").forEach(e=>e.classList.toggle("on", e.dataset.lang===LANG));
+render();
+</script>
+</body>
+</html>
