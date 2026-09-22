@@ -12,29 +12,38 @@ import {
   type ParsedMessage,
 } from "./webhook.js";
 import { getOrRestoreHistory, setHistory, getAllActiveSessions } from "./sessions.js";
-import { markMessageProcessed, pruneProcessedMessages, detectUnaccent, setOutboundConsent } from "./db.js";
+import {
+  markMessageProcessed, pruneProcessedMessages, detectUnaccent, setOutboundConsent, pool,
+  savePendingWhatsApp, loadPendingWhatsApp, claimPendingWhatsApp, requeuePendingWhatsApp,
+} from "./db.js";
 import { detectConsentIntent, consentConfirmation } from "./consent.js";
 import { summarizeAndSaveSession } from "./summarizer.js";
 import { normalizePhone } from "./phone.js";
 import { whatsappIdentity } from "./identity.js";
 import { runAgent } from "./claude.js";
 import { sendText, markAsReadWithTyping } from "./whatsapp.js";
-import { sanitizeReply, looksLikeInternalNote } from "./format.js";
-import { logMessage } from "./dashboard/logger.js";
+import { sanitizeReply, outboundGate } from "./format.js";
+import { logMessage, logScopeBlock } from "./dashboard/logger.js";
 import { runDashboardMigrations } from "./dashboard/migrations.js";
 import { startMonitor } from "./monitor.js";
 import { startTester } from "./tester.js";
 import { startAnalyst } from "./analyst.js";
+import { startJuiz } from "./juiz.js";
 import { startReminders } from "./reminders.js";
 import { startEmailChannel, handleInboundEmail } from "./emailChannel.js";
+import { tratarEventoReserva } from "./reservationEvents.js";
+import { verificarSegredoWebhook, STATUS_DE } from "./webhookAuth.js";
 import { createDashboardRouter } from "./dashboard/routes.js";
 import { dashboardCredentials } from "./dashboard/auth.js";
-import { enqueueMessage } from "./conversationQueue.js";
+import { enqueueMessage, isBusy } from "./conversationQueue.js";
 import { isHumanControlled } from "./handoff.js";
 import { isOutOfScope, textFromBlocks } from "./scopeScreen.js";
 import { seedCostGuard } from "./costGuard.js";
 import { recallMemories, startEmbeddingsSync } from "./embeddings.js";
 import { startAlerts } from "./alerts.js";
+import { createHash } from "node:crypto";
+import { systemPromptFor } from "./systemPrompt.js";
+import { BUILD } from "./buildInfo.js";
 
 // ─── Fail-closed em produção ─────────────────────────────────────────────────
 // Segurança não fica implícita: com NODE_ENV=production, webhook sem HMAC ou
@@ -71,8 +80,24 @@ app.use(
 );
 
 app.get("/", (_req, res) => res.redirect("/dashboard"));
+// /health também identifica O QUE está no ar. Em 11/09 publicamos uma correção e não havia
+// como verificar de fora se ela tinha subido: o endpoint dizia apenas "ok". Agora ele devolve
+// a etiqueta da versão, a impressão digital do prompt REALMENTE carregado (não a do arquivo em
+// disco: se o build for antigo, o hash denuncia) e há quanto tempo o processo subiu.
+const PROMPT_HASH = createHash("sha256")
+  .update(systemPromptFor("whatsapp") + systemPromptFor("email"))
+  .digest("hex")
+  .slice(0, 12);
+const SUBIU_EM = new Date().toISOString();
 app.get("/health", (_req, res) => {
-  res.json({ ok: true, service: "aria-whatsapp-agent" });
+  res.json({
+    ok: true,
+    service: "aria-whatsapp-agent",
+    build: BUILD,
+    promptHash: PROMPT_HASH,
+    startedAt: SUBIU_EM,
+    uptimeSeconds: Math.round(process.uptime()),
+  });
 });
 
 // Catálogo de testes (PT/FR) — página pública para a equipe de QA validar o agente.
@@ -169,6 +194,40 @@ app.post("/webhook/email", (req, res) => {
   void handleInboundEmail(req.body).catch((err) =>
     console.error("[email] inbound webhook error", err),
   );
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Evento TRANSACIONAL de reserva. O n8n, que já manda o e-mail em cada
+// transição, avisa aqui e a Aria dispara o template de WhatsApp.
+//
+// Corpo: { event, reservation_code, trace_id? } — só referências, nunca PII.
+// Autenticação: x-aria-secret, comparação em tempo constante. Sem segredo
+// configurado, a rota NÃO EXISTE (404): não há caminho de envio sem senha.
+//
+// Resposta síncrona de propósito: o n8n registra o desfecho de cada evento no
+// próprio histórico de execução, o que torna o fluxo auditável dos dois lados.
+// ─────────────────────────────────────────────────────────────────────────────
+app.post("/webhook/reservation-event", (req, res) => {
+  const veredito = verificarSegredoWebhook({
+    habilitado: config.reservationEvents.enabled,
+    esperado: config.reservationEvents.secret,
+    fornecido: req.header("x-aria-secret"),
+  });
+  if (veredito !== "ok") {
+    res.sendStatus(STATUS_DE[veredito]);
+    return;
+  }
+
+  void tratarEventoReserva(req.body)
+    .then((r) => {
+      // 200 mesmo quando nada foi enviado: "telefone não enviável" e "opt-out"
+      // são desfechos corretos, não erros do chamador. O n8n não deve re-tentar.
+      res.status(r.acao === "payload_invalido" ? 400 : 200).json(r);
+    })
+    .catch((err) => {
+      console.error("[evento-reserva] erro não tratado", err);
+      res.status(500).json({ acao: "erro", detalhe: "falha interna" });
+    });
 });
 
 function verifySignature(req: express.Request): boolean {
@@ -329,7 +388,7 @@ async function processTurn(
   blocks: AriaContentBlock[],
 ): Promise<void> {
   // Conversa sob controle de um atendente humano → a Aria fica em silêncio.
-  if (isHumanControlled(chatId)) {
+  if (await isHumanControlled(chatId)) {
     console.log(`[handoff] ${chatId} sob controle humano — Aria em silêncio`);
     return;
   }
@@ -389,16 +448,40 @@ async function processTurn(
   }
 
   const seed = history.length === 0 ? [systemHint] : [];
-  const { reply, updatedHistory } = await runAgent([...history, ...seed], userMsg, identity);
+  let turno: Awaited<ReturnType<typeof runAgent>>;
+  try {
+    turno = await runAgent([...history, ...seed], userMsg, identity);
+  } catch (err) {
+    // O modelo falhou (crédito, chave, rede). Antes a mensagem morria aqui — a Meta já
+    // recebeu o 200 e não reenvia. Agora vai para a fila de replay e o alerta URGENTE
+    // já foi aberto por alertarModeloIndisponivel() em claude.ts.
+    await savePendingWhatsApp(chatId, pushName, blocks).catch((e) =>
+      console.error("[replay] falha ao guardar mensagem pendente:", e instanceof Error ? e.message : e),
+    );
+    throw err;
+  }
+  const { reply, updatedHistory } = turno;
 
   setHistory(chatId, updatedHistory);
 
   const clean = sanitizeReply(reply);
   if (!clean) return;
 
-  // Silêncio deliberado ou nota interna do agente — nunca vai para o cliente.
-  if (looksLikeInternalNote(clean)) {
-    console.log(`[agent] silêncio do agente para ${chatId} — nota interna suprimida`);
+  // Porta única de saída (a mesma do e-mail): nota interna, dump de tool, marcador
+  // de silêncio ou resposta em idioma diferente do da mensagem recebida NÃO saem.
+  // A supressão vira registro no painel — antes só existia um console.log, e uma
+  // supressão invisível é indistinguível de um agente que não respondeu.
+  const portao = outboundGate(clean, textFromBlocks(blocks));
+  if (!portao.ok) {
+    console.warn(`[agent] resposta barrada para ${chatId} — ${portao.motivo}`);
+    void logScopeBlock({
+      chatId,
+      channel: "whatsapp",
+      sender: chatId,
+      layer: "outbound",
+      reason: `resposta barrada na saída: ${portao.motivo}`,
+      snippet: clean.slice(0, 300),
+    }).catch(() => {});
     return;
   }
 
@@ -420,6 +503,44 @@ async function processTurn(
       content: clean,
     });
   }
+}
+
+/**
+ * Replay da fila do WhatsApp: a cada 10 min, cada mensagem cujo turno falhou volta pelo
+ * MESMO caminho da conversa (fila por chat, debounce, escopo, porta de saída). Só se a
+ * conversa não estiver ocupada. Até 7 dias e 20 tentativas por mensagem — depois disso
+ * a linha fica na tabela como evidência, não como fantasma.
+ */
+function startWhatsAppReplay(): void {
+  const tick = async () => {
+    let pendentes: Awaited<ReturnType<typeof loadPendingWhatsApp>>;
+    try { pendentes = await loadPendingWhatsApp(7, 20); } catch { return; }
+    for (const p of pendentes) {
+      if (isBusy(p.chat_id)) continue;
+      const claimed = await claimPendingWhatsApp(p.id).catch(() => null);
+      if (!claimed) continue;
+      console.log(`[replay] reprocessando mensagem de WhatsApp pendente desde ${claimed.created_at.toISOString()} (tentativa ${claimed.tentativas + 1})`);
+      enqueueMessage(
+        claimed.chat_id,
+        claimed.push_name,
+        claimed.blocks as AriaContentBlock[],
+        async (chatId, pushName, blocks) => {
+          try { await processTurn(chatId, pushName, blocks); }
+          catch (err) {
+            // processTurn já regravou a mensagem (savePendingWhatsApp) com a linha nova;
+            // aqui só corrigimos o contador, apagando a duplicata e regravando com +1.
+            await requeuePendingWhatsApp(claimed).catch(() => {});
+            await pool.query(`DELETE FROM public.aria_pending_whatsapp WHERE chat_id = $1 AND tentativas = 0 AND created_at > $2`, [claimed.chat_id, claimed.created_at]).catch(() => {});
+            throw err;
+          }
+        },
+        config.reply.debounceMs,
+      );
+    }
+  };
+  setTimeout(() => void tick(), 30_000);
+  setInterval(() => void tick(), 10 * 60_000).unref();
+  console.log("[replay] fila de WhatsApp: reprocessamento a cada 10 min");
 }
 
 function sleep(ms: number): Promise<void> {
@@ -467,7 +588,9 @@ app.listen(config.port, async () => {
       // Inicia serviços autônomos somente após migrations garantidas.
       startMonitor();
       startTester();
+      startWhatsAppReplay();
       startAnalyst();
+      startJuiz();
       startReminders();
       startEmailChannel();
       startDedupCleanup();
@@ -481,7 +604,9 @@ app.listen(config.port, async () => {
       // Inicia mesmo assim — os serviços tratam falhas internamente.
       startMonitor();
       startTester();
+      startWhatsAppReplay();
       startAnalyst();
+      startJuiz();
       startReminders();
       startEmailChannel();
       startDedupCleanup();

@@ -1,6 +1,7 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { fetchMediaById } from "./whatsapp.js";
 import { transcribeAudio } from "./media.js";
+import { neutralizeSystemMarkers } from "./format.js";
 
 // SDK v0.30.x doesn't export a combined `ContentBlockParam` union, so we declare
 // the subset we actually emit. Compatible with newer SDKs as well.
@@ -127,7 +128,9 @@ async function parseOneMessage(
   switch (message.type) {
     case "text": {
       const body = message.text?.body?.trim();
-      if (body) content.push({ type: "text", text: body });
+      // Texto do cliente é NEUTRALIZADO contra forja de "[Sistema:" — só o
+      // servidor (blocos abaixo) pode injetar esse marcador.
+      if (body) content.push({ type: "text", text: neutralizeSystemMarkers(body) });
       break;
     }
 
@@ -146,7 +149,7 @@ async function parseOneMessage(
         }
       }
       const caption = message.image?.caption?.trim();
-      if (caption) content.push({ type: "text", text: caption });
+      if (caption) content.push({ type: "text", text: neutralizeSystemMarkers(caption) });
       break;
     }
 
@@ -156,7 +159,7 @@ async function parseOneMessage(
         if (media) {
           const transcript = await transcribeAudio(media.base64, media.mimetype);
           if (transcript) {
-            content.push({ type: "text", text: transcript });
+            content.push({ type: "text", text: neutralizeSystemMarkers(transcript) });
           } else {
             content.push({
               type: "text",
@@ -170,7 +173,8 @@ async function parseOneMessage(
     }
 
     case "button": {
-      if (message.button?.text) content.push({ type: "text", text: message.button.text });
+      if (message.button?.text)
+        content.push({ type: "text", text: neutralizeSystemMarkers(message.button.text) });
       break;
     }
 
@@ -182,8 +186,9 @@ async function parseOneMessage(
       const title = br?.title ?? lr?.title;
       const id = br?.id ?? lr?.id;
       if (title) {
-        const idHint = id && id !== title ? ` [Sistema: seleção id=${id}]` : "";
-        content.push({ type: "text", text: `${title}${idHint}` });
+        const idHint =
+          id && id !== title ? ` [Sistema: seleção id=${neutralizeSystemMarkers(id)}]` : "";
+        content.push({ type: "text", text: `${neutralizeSystemMarkers(title)}${idHint}` });
       }
       break;
     }
@@ -191,7 +196,7 @@ async function parseOneMessage(
     case "location": {
       if (message.location) {
         const { latitude, longitude, name, address } = message.location;
-        const desc = [name, address].filter(Boolean).join(" — ");
+        const desc = neutralizeSystemMarkers([name, address].filter(Boolean).join(" — "));
         // Explicit format so the model passes lat/lng correctly to compute_route_to_restaurant.
         content.push({
           type: "text",
@@ -218,7 +223,7 @@ async function parseOneMessage(
           });
         }
       }
-      if (caption) content.push({ type: "text", text: caption });
+      if (caption) content.push({ type: "text", text: neutralizeSystemMarkers(caption) });
       if (content.length === 0) {
         content.push({
           type: "text",
@@ -232,7 +237,8 @@ async function parseOneMessage(
     case "video":
     case "sticker": {
       const caption = (message as WhatsAppIncomingMessage).video?.caption;
-      if (caption?.trim()) content.push({ type: "text", text: caption.trim() });
+      if (caption?.trim())
+        content.push({ type: "text", text: neutralizeSystemMarkers(caption.trim()) });
       else
         content.push({
           type: "text",

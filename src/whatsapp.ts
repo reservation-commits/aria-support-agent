@@ -2,6 +2,7 @@ import axios from "axios";
 import { config } from "./config.js";
 import {
   clampText,
+  sanitizeTemplateParam,
   splitForWhatsApp,
   WA_BUTTON_TITLE_MAX,
   WA_INTERACTIVE_BODY_MAX,
@@ -229,8 +230,10 @@ export async function sendTemplate(params: {
   locale: string;
   bodyParams: string[];
 }): Promise<boolean> {
-  try {
-    await graphClient.post(`/${config.whatsapp.phoneNumberId}/messages`, {
+  // Usa o MESMO postWithRetry do texto livre: uma falha transitória da Cloud
+  // API (5xx, rede, 429) não pode queimar uma notificação de reserva.
+  return postWithRetry(
+    {
       messaging_product: "whatsapp",
       recipient_type: "individual",
       to: params.to,
@@ -242,26 +245,20 @@ export async function sendTemplate(params: {
           ? [
               {
                 type: "body",
-                parameters: params.bodyParams.map((t) => ({ type: "text", text: t })),
+                // Saneado aqui, no único ponto de saída, para que nenhum
+                // chamador consiga mandar quebra de linha ou tabulação — que a
+                // Meta rejeita com 400 genérico.
+                parameters: params.bodyParams.map((t) => ({
+                  type: "text",
+                  text: sanitizeTemplateParam(t),
+                })),
               },
             ]
           : [],
       },
-    });
-    return true;
-  } catch (err) {
-    if (axios.isAxiosError(err)) {
-      const e = err.response?.data?.error;
-      console.error(
-        "[wa.sendTemplate]",
-        err.response?.status,
-        JSON.stringify({ message: e?.message, code: e?.code, subcode: e?.error_subcode }),
-      );
-    } else {
-      console.error("[wa.sendTemplate]", err);
-    }
-    return false;
-  }
+    },
+    "sendTemplate",
+  );
 }
 
 /**

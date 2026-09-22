@@ -5,8 +5,10 @@ import { renderEmailHtml } from "../src/emailTemplate.js";
 test("renderEmailHtml: embala o texto com a marca TWK", () => {
   const html = renderEmailHtml("Prezado Ricardo,\n\nSua reserva está confirmada.");
   assert.ok(html.includes("THE&nbsp;WORLD&nbsp;KEYS"), "wordmark presente");
-  assert.ok(html.includes("#c9a96e"), "ouro da marca presente");
-  assert.ok(html.includes("#070b10"), "ink da marca presente");
+  // Padrão TWK de notificações (ADR-015, 11/09): cartão escuro e dourado, iguais aos transacionais.
+  assert.ok(html.includes("#CE9E3C"), "ouro da marca presente");
+  assert.ok(html.includes("#12100C"), "cartão escuro presente");
+  assert.ok(html.includes("twk-logo.gif"), "chave da marca presente");
   assert.ok(html.includes("Prezado Ricardo,"));
   assert.ok(html.includes("Sua reserva está confirmada."));
   assert.ok(/<p[^>]*>Prezado Ricardo,<\/p>/.test(html), "parágrafos separados");
@@ -25,7 +27,7 @@ test("renderEmailHtml: transforma URLs em links dourados", () => {
   );
   assert.ok(html.includes('href="https://theworldkeys.com/hospitality/contraste-milano/"'));
   assert.ok(html.includes('href="https://theworldkeys.com/users/reservations"'), "domínio sem protocolo vira link");
-  assert.ok(html.includes("#9e7c48"), "links no gold-dark");
+  assert.ok(html.includes("#E6C87A"), "links no dourado claro, legível sobre o escuro");
 });
 
 test("renderEmailHtml: quebra simples vira <br/>, dupla vira parágrafo", () => {

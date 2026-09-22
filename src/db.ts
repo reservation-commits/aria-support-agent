@@ -3,7 +3,6 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { config } from "./config.js";
 import { assertReadOnlySql } from "./sqlGuard.js";
 import { tzForRestaurant, nowInTz, isOpenNow, type HourRange } from "./tz.js";
-import { randomUUID } from "node:crypto";
 
 const { Pool } = pg;
 
@@ -110,82 +109,11 @@ export async function getRestaurantInfo(restaurantId: string) {
   return rows;
 }
 
-export type CreateReservationInput = {
-  bookingDate: string;
-  reservationTime: string;
-  people: number;
-  bookingDetails: string;
-  restaurantId: string;
-  customerId: string;
-};
-
-export async function createReservation(input: CreateReservationInput) {
-  const code = generateReservationCode();
-  const { rows } = await pool.query(
-    `INSERT INTO public.reservations
-       (reservation_code, booking_date, reservation_time, people, booking_status,
-        booking_details, restaurant_id, customer_id, customer_stage, created_date)
-     VALUES ($1, $2, $3, $4, 'pending', $5, $6, $7, 'new', NOW())
-     RETURNING reservation_id, reservation_code`,
-    [
-      code,
-      input.bookingDate,
-      input.reservationTime,
-      input.people,
-      input.bookingDetails,
-      input.restaurantId,
-      input.customerId,
-    ],
-  );
-  return rows[0];
-}
-
-export type UpdateReservationInput = {
-  code: string;
-  status?: string;
-  bookingDate?: string;
-  reservationTime?: string;
-  people?: number;
-  bookingDetails?: string;
-};
-
-export async function updateReservation(input: UpdateReservationInput) {
-  const sets: string[] = [];
-  const values: unknown[] = [];
-  let i = 1;
-
-  if (input.status !== undefined) { sets.push(`booking_status = $${i++}`); values.push(input.status); }
-  if (input.bookingDate !== undefined) { sets.push(`booking_date = $${i++}`); values.push(input.bookingDate); }
-  if (input.reservationTime !== undefined) { sets.push(`reservation_time = $${i++}`); values.push(input.reservationTime); }
-  if (input.people !== undefined) { sets.push(`people = $${i++}`); values.push(input.people); }
-  if (input.bookingDetails !== undefined) { sets.push(`booking_details = $${i++}`); values.push(input.bookingDetails); }
-
-  if (sets.length === 0) {
-    throw new Error("update_reservation: nothing to update");
-  }
-
-  values.push(input.code);
-  const { rows } = await pool.query(
-    `UPDATE public.reservations
-        SET ${sets.join(", ")}
-      WHERE reservation_code = $${i}
-      RETURNING reservation_id, reservation_code, booking_status, booking_date, reservation_time, people`,
-    values,
-  );
-  return rows[0] ?? null;
-}
-
-export async function cancelReservation(code: string) {
-  const { rows } = await pool.query(
-    `UPDATE public.reservations
-        SET booking_status = 'cancelled',
-            modified_by = 'aria_whatsapp'
-      WHERE reservation_code = $1
-      RETURNING reservation_id, reservation_code, booking_status`,
-    [code],
-  );
-  return rows[0] ?? null;
-}
+// Escrita direta em `reservations` (createReservation / updateReservation /
+// cancelReservation) foi REMOVIDA em 2026-09-21. Eram funções sem chamador —
+// código morto com poder de escrita numa tabela que, pelo ADR-004, só a
+// plataforma altera. A Aria aplica decisões pela API do site
+// (platformReservation.ts → POST /api/reservations/manage), nunca por SQL.
 
 export async function findUser(params: { email?: string; phone?: string }) {
   const { rows } = await pool.query(
@@ -204,10 +132,14 @@ export async function logAttendanceEvent(params: {
   reservationId: string | null;
   description: string;
 }) {
+  // `update_events.id` é varchar SEM default: sem gerar o id aqui, o INSERT falhava
+  // 100% das vezes ("null value in column id") e o registro do atendimento — que o
+  // system prompt manda fazer — era perdido em silêncio (auditoria de 2026-09-22:
+  // 10 chamadas, 0 sucessos).
   await pool.query(
     `INSERT INTO public.update_events
-       (created_date, establishment_id, name, representative_actions, reservation_id)
-     VALUES (NOW(), $1, $2, $3, $4)`,
+       (id, created_date, establishment_id, name, representative_actions, reservation_id)
+     VALUES ('aria-' || gen_random_uuid()::text, NOW(), $1, $2, $3, $4)`,
     [params.restaurantId, "Atendimento Aria WhatsApp", params.description, params.reservationId],
   );
   return { ok: true };
@@ -294,6 +226,18 @@ export type SearchRestaurantsInput = {
   limit?: number;
 };
 
+// Histórico de resposta (90 dias), exposto ao modelo em toda busca de restaurante. Em 11/09 a Aria
+// ofereceu a um cliente irritado três casas "com disponibilidade imediata" que nunca tinham confirmado
+// um único pedido pela plataforma. Critério idêntico ao do Guardião da Reserva: ≥4 pedidos em 90 dias
+// e ≥50% aceitos. Aritmética inteira (aceitos*2 >= pedidos): nada de float.
+const HISTORICO_90D = `SELECT restaurant_id, count(*)::int AS pedidos_90d,
+         count(*) FILTER (WHERE booking_status ILIKE 'accept%')::int AS aceitos_90d
+    FROM public.reservations
+   WHERE created_date >= now() - interval '90 days'
+   GROUP BY 1`;
+const CAMPOS_HISTORICO = `coalesce(h.pedidos_90d, 0) AS pedidos_90d, coalesce(h.aceitos_90d, 0) AS aceitos_90d,
+       (coalesce(h.pedidos_90d, 0) >= 4 AND coalesce(h.aceitos_90d, 0) * 2 >= coalesce(h.pedidos_90d, 0)) AS confirma_pedidos`;
+
 export async function searchRestaurants(input: SearchRestaurantsInput) {
   const conditions: string[] = ["published = true"];
   const values: unknown[] = [];
@@ -322,10 +266,13 @@ export async function searchRestaurants(input: SearchRestaurantsInput) {
   values.push(limit);
 
   const { rows } = await pool.query(
-    `SELECT restaurant_id, name, city, country, slug, price_range_id, site_url, url_page_twk
-       FROM public.db_restaurants
+    `WITH h AS (${HISTORICO_90D})
+     SELECT r.restaurant_id, name, city, country, slug, price_range_id, site_url, url_page_twk,
+            ${CAMPOS_HISTORICO}
+       FROM public.db_restaurants r
+       LEFT JOIN h ON h.restaurant_id = r.restaurant_id
       WHERE ${conditions.join(" AND ")}
-      ORDER BY name
+      ORDER BY confirma_pedidos DESC, name
       LIMIT $${i}`,
     values,
   );
@@ -381,9 +328,11 @@ export async function discoverRestaurants(input: DiscoverRestaurantsInput) {
 
   if (q) {
     const { rows } = await pool.query(
-      `SELECT restaurant_id, name, city, country, slug, price_range_id, site_url, url_page_twk,
-              ts_rank(${ftsDoc}, ${ftsQuery}) AS rank
-         FROM public.db_restaurants
+      `WITH h AS (${HISTORICO_90D})
+       SELECT r.restaurant_id, name, city, country, slug, price_range_id, site_url, url_page_twk,
+              ts_rank(${ftsDoc}, ${ftsQuery}) AS rank, ${CAMPOS_HISTORICO}
+         FROM public.db_restaurants r
+         LEFT JOIN h ON h.restaurant_id = r.restaurant_id
         WHERE published = true
           AND ($2::text IS NULL OR city ILIKE $2)
           AND ($3::text IS NULL OR country ILIKE $3)
@@ -397,14 +346,17 @@ export async function discoverRestaurants(input: DiscoverRestaurantsInput) {
 
   // Fallback ILIKE (também usado quando query vem vazia — só filtros).
   const { rows } = await pool.query(
-    `SELECT restaurant_id, name, city, country, slug, price_range_id, site_url, url_page_twk
-       FROM public.db_restaurants
+    `WITH h AS (${HISTORICO_90D})
+     SELECT r.restaurant_id, name, city, country, slug, price_range_id, site_url, url_page_twk,
+            ${CAMPOS_HISTORICO}
+       FROM public.db_restaurants r
+       LEFT JOIN h ON h.restaurant_id = r.restaurant_id
       WHERE published = true
         AND ($2::text IS NULL OR city ILIKE $2)
         AND ($3::text IS NULL OR country ILIKE $3)
         AND ($1::text IS NULL OR ${u("name")} ILIKE ${u("$1")}
                               OR ${u("coalesce(about_text,'')")} ILIKE ${u("$1")})
-      ORDER BY name ASC
+      ORDER BY confirma_pedidos DESC, name ASC
       LIMIT $4`,
     [q ? `%${q}%` : null, input.city ? `%${input.city}%` : null, input.country ? `%${input.country}%` : null, limit],
   );
@@ -477,7 +429,7 @@ function annotateOpenNow(rows: Array<Record<string, unknown>>): void {
 async function queryNearbyWithHours(input: NearbyRestaurantsInput, limit: number) {
   const { rows } = await pool.query(
     `WITH base AS (
-       SELECT restaurant_id, name, city, country, slug, address,
+       SELECT restaurant_id, name, city, country, slug, address_of_establishment AS address,
               latitude, longitude, price_range_id, site_url, about_text, url_page_twk,
               (2 * 6371 * asin(sqrt(
                 power(sin(radians((latitude::float8 - $1::float8) / 2)), 2) +
@@ -515,7 +467,7 @@ async function queryNearbyWithHours(input: NearbyRestaurantsInput, limit: number
 
 async function queryNearbyBasic(input: NearbyRestaurantsInput, limit: number) {
   const { rows } = await pool.query(
-    `SELECT restaurant_id, name, city, country, slug, address,
+    `SELECT restaurant_id, name, city, country, slug, address_of_establishment AS address,
             latitude, longitude, price_range_id, site_url, url_page_twk,
             (2 * 6371 * asin(sqrt(
               power(sin(radians((latitude::float8 - $1::float8) / 2)), 2) +
@@ -603,7 +555,7 @@ export async function getRestaurantsByIds(ids: string[]) {
 export async function getRestaurantWithLocation(restaurantId: string) {
   try {
     const { rows } = await pool.query(
-      `SELECT restaurant_id, name, city, country, slug, address, latitude, longitude,
+      `SELECT restaurant_id, name, city, country, slug, address_of_establishment AS address, latitude, longitude,
               telephone_of_the_establishment, email_for_reservations, site_url,
               about_text, url_page_twk
          FROM public.db_restaurants
@@ -612,8 +564,9 @@ export async function getRestaurantWithLocation(restaurantId: string) {
     );
     return rows[0] ?? null;
   } catch (err) {
-    // Resiliência a schema diferente (ex.: sem coluna `address`): tenta só o
-    // essencial para a reserva (url_page_twk) sem derrubar o fluxo.
+    // A coluna real é `address_of_establishment` (corrigido em 2026-09-22: o nome
+    // `address` derrubava get_restaurant_location, compute_route e o link de reserva
+    // em 100% das chamadas — o fallback abaixo salvava o fluxo, mas sem endereço).
     console.warn("[getRestaurantWithLocation] select completo falhou, usando essencial:", err instanceof Error ? err.message : err);
     const { rows } = await pool.query(
       `SELECT restaurant_id, name, city, country, slug, site_url, url_page_twk
@@ -906,12 +859,49 @@ export type ReminderRow = {
   people: number | null;
   customer_phone: string | null;
   customer_name: string | null;
+  /** false = o fuso do restaurante não é um nome IANA que o Postgres reconheça. */
+  tz_valido?: boolean;
+  /** Fuso efetivamente usado para situar a reserva no tempo. */
+  tz_usado?: string;
 };
+
+/**
+ * Normaliza um valor de booking_status para comparação.
+ *
+ * O banco grava com inicial maiúscula ('Accept', 'Pending', 'Decline',
+ * 'Declined (client)', 'In Treatment'); a configuração usa minúsculas. A
+ * comparação antiga era `=`, sensível a caixa — o filtro não casava com nada e
+ * as varreduras enviavam ZERO em silêncio. A normalização acontece aqui dentro,
+ * nos dois lados da comparação, para que nenhum chamador possa errar de novo.
+ */
+function normalizarStatus(s: string): string {
+  return s.trim().toLowerCase();
+}
+
+/** Status distintos realmente presentes em `reservations`, normalizados. */
+export async function getDistinctBookingStatuses(): Promise<string[]> {
+  const { rows } = await pool.query(
+    `SELECT DISTINCT lower(btrim(booking_status)) AS s
+       FROM public.reservations
+      WHERE coalesce(btrim(booking_status), '') <> ''`,
+  );
+  return rows.map((r: { s: string }) => r.s);
+}
 
 /**
  * Reservas cujo horário cai dentro da janela [now+windowFromH, now+windowToH],
  * com booking_status em `statuses`, e que ainda não receberam um lembrete do
  * tipo `kind`. Usada pelo scheduler de lembrete (ex: "2h antes", só aceitas).
+ *
+ * FUSO: `booking_date` + `reservation_time` são hora LOCAL do restaurante, sem
+ * fuso. O servidor roda em UTC. Comparar os dois direto (o que era feito antes)
+ * errava o lembrete pela diferença entre UTC e o fuso da casa — em Paris, 2h,
+ * que é exatamente a antecedência do lembrete: ele sairia na hora da reserva.
+ * Agora a hora local é situada no fuso do próprio restaurante
+ * (`db_restaurants.timezone`, preenchido em 100% dos publicados).
+ * O LEFT JOIN em `pg_timezone_names` valida o fuso: nome desconhecido não
+ * derruba a consulta (que `AT TIME ZONE` faria), vem marcado em `tz_valido`
+ * para o chamador tratar em vez de enviar na hora errada.
  */
 export async function getReservationsForReminder(
   kind: string,
@@ -922,21 +912,25 @@ export async function getReservationsForReminder(
   const { rows } = await pool.query(
     `SELECT r.reservation_code, d.name AS restaurant_name, d.city,
             r.booking_date, r.reservation_time, r.people,
-            u.phone AS customer_phone, u.name AS customer_name
+            u.phone AS customer_phone, u.name AS customer_name,
+            (z.name IS NOT NULL) AS tz_valido,
+            COALESCE(z.name, 'UTC') AS tz_usado
        FROM public.reservations r
        JOIN public.db_restaurants d ON r.restaurant_id = d.restaurant_id
        JOIN nextauth."User" u       ON r.customer_id = u.id
+       LEFT JOIN pg_timezone_names z ON z.name = btrim(d.timezone)
        LEFT JOIN public.aria_reminders_sent s
               ON s.reservation_code = r.reservation_code AND s.kind = $1
-      WHERE r.booking_status = ANY($4::text[])
+      WHERE lower(btrim(r.booking_status)) = ANY($4::text[])
         AND u.phone IS NOT NULL
         AND s.id IS NULL
-        AND (r.booking_date::timestamp + COALESCE(r.reservation_time, '00:00')::time)
+        AND ((r.booking_date + COALESCE(r.reservation_time, '00:00'::time))
+               AT TIME ZONE COALESCE(z.name, 'UTC'))
               BETWEEN NOW() + ($2 || ' hours')::interval
                   AND NOW() + ($3 || ' hours')::interval
       ORDER BY r.booking_date ASC
       LIMIT 200`,
-    [kind, String(windowFromHours), String(windowToHours), statuses],
+    [kind, String(windowFromHours), String(windowToHours), statuses.map(normalizarStatus)],
   );
   return rows;
 }
@@ -954,10 +948,129 @@ export async function markReminderSent(
   );
 }
 
+export type EventReservationRow = ReminderRow & {
+  booking_status: string | null;
+  reschedule_proposed_date: string | Date | null;
+  reschedule_proposed_time: string | null;
+};
+
+/**
+ * Uma reserva pelo código, com o que o template precisa. Usada pelo gatilho por
+ * EVENTO (o n8n avisa "mudou de status" e a Aria lê aqui os dados) — o webhook
+ * recebe apenas referências, nunca dados do cliente.
+ */
+export async function getReservationForEvent(
+  reservationCode: string,
+): Promise<EventReservationRow | null> {
+  const { rows } = await pool.query(
+    `SELECT r.reservation_code, d.name AS restaurant_name, d.city,
+            r.booking_date, r.reservation_time, r.people, r.booking_status,
+            r.reschedule_proposed_date, r.reschedule_proposed_time,
+            u.phone AS customer_phone, u.name AS customer_name,
+            (z.name IS NOT NULL) AS tz_valido,
+            COALESCE(z.name, 'UTC') AS tz_usado
+       FROM public.reservations r
+       JOIN public.db_restaurants d ON r.restaurant_id = d.restaurant_id
+       LEFT JOIN nextauth."User" u  ON r.customer_id = u.id
+       LEFT JOIN pg_timezone_names z ON z.name = btrim(d.timezone)
+      WHERE r.reservation_code = $1
+      LIMIT 1`,
+    [reservationCode],
+  );
+  return rows[0] ?? null;
+}
+
+/**
+ * Reserva o direito de enviar, de forma ATÔMICA (claim antes do envio).
+ *
+ * Retorna `true` se esta chamada ganhou o direito, `false` se outra já tinha
+ * ganhado. O `UNIQUE (reservation_code, kind)` é quem decide, no servidor —
+ * dois webhooks simultâneos do n8n para a mesma reserva não viram duas
+ * mensagens ao cliente, e isso continua valendo se um dia houver mais de uma
+ * réplica da Aria (uma trava em memória não sobreviveria a isso).
+ */
+export async function reservarEnvio(
+  reservationCode: string,
+  kind: string,
+  phone: string,
+): Promise<boolean> {
+  const { rows } = await pool.query(
+    `INSERT INTO public.aria_reminders_sent (reservation_code, kind, phone)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (reservation_code, kind) DO NOTHING
+     RETURNING id`,
+    [reservationCode, kind, phone],
+  );
+  return rows.length > 0;
+}
+
+/**
+ * Devolve o direito de enviar quando o envio FALHOU — sem isso, uma falha
+ * transitória da Cloud API queimaria a notificação para sempre.
+ * Só remove a própria marca de controle da Aria; não toca em dado de negócio.
+ */
+export async function liberarEnvio(reservationCode: string, kind: string): Promise<void> {
+  await pool.query(
+    `DELETE FROM public.aria_reminders_sent WHERE reservation_code = $1 AND kind = $2`,
+    [reservationCode, kind],
+  );
+}
+
+// ─── Fila de replay do WhatsApp (turno que falhou no modelo) ─────────────────
+
+/** Guarda a mensagem cujo turno falhou. Blocos de mídia grandes são reduzidos ao texto. */
+export async function savePendingWhatsApp(chatId: string, pushName: string | null, blocks: unknown[]): Promise<void> {
+  let payload = blocks;
+  if (JSON.stringify(blocks).length > 200_000) {
+    payload = blocks.filter((b) => (b as { type?: string })?.type === "text");
+    if (payload.length === 0) payload = [{ type: "text", text: "[mídia recebida enquanto o atendimento estava indisponível]" }];
+  }
+  await pool.query(
+    `INSERT INTO public.aria_pending_whatsapp (chat_id, push_name, blocks) VALUES ($1, $2, $3::jsonb)`,
+    [chatId, pushName, JSON.stringify(payload)],
+  );
+}
+
+export type PendingWhatsApp = { id: number; chat_id: string; push_name: string | null; blocks: unknown[]; tentativas: number; created_at: Date };
+
+/** Pendentes com até `maxAgeDays` dias e menos de `maxTentativas` tentativas, mais antigos primeiro. */
+export async function loadPendingWhatsApp(maxAgeDays: number, maxTentativas: number): Promise<PendingWhatsApp[]> {
+  const { rows } = await pool.query(
+    `SELECT id, chat_id, push_name, blocks, tentativas, created_at
+       FROM public.aria_pending_whatsapp
+      WHERE created_at > NOW() - ($1 || ' days')::interval AND tentativas < $2
+      ORDER BY created_at ASC LIMIT 50`,
+    [String(maxAgeDays), maxTentativas],
+  );
+  return rows;
+}
+
+/** Reivindica a linha para uma tentativa (remove da fila; se falhar de novo, é regravada com tentativas+1). */
+export async function claimPendingWhatsApp(id: number): Promise<PendingWhatsApp | null> {
+  const { rows } = await pool.query(
+    `DELETE FROM public.aria_pending_whatsapp WHERE id = $1 RETURNING id, chat_id, push_name, blocks, tentativas, created_at`,
+    [id],
+  );
+  return rows[0] ?? null;
+}
+
+export async function requeuePendingWhatsApp(p: PendingWhatsApp): Promise<void> {
+  await pool.query(
+    `INSERT INTO public.aria_pending_whatsapp (chat_id, push_name, blocks, tentativas, created_at) VALUES ($1, $2, $3::jsonb, $4, $5)`,
+    [p.chat_id, p.push_name, JSON.stringify(p.blocks), p.tentativas + 1, p.created_at],
+  );
+}
+
 /**
  * Reservas paradas em aprovação há `hours`+ horas (watchdog PENDENTE_12H).
  * Só reservas cuja data ainda está no futuro e que ainda não geraram escalação
  * automática (dedup via aria_reminders_sent, kind = 'pending_watch').
+ *
+ * Só pendência VIVA: `expired_at IS NULL`. As 13.162 reservas vencidas de
+ * 11/2024 a 08/2026 mantiveram o `booking_status = 'Pending'` de propósito
+ * (para não quebrar site, n8n e painéis) — sem este filtro o watchdog abriria
+ * escalação para todas elas. Comparação de status insensível a caixa: o banco
+ * grava 'Pending', a configuração diz 'pending'.
  */
 export async function getStalePendingReservations(
   hours: number,
@@ -972,13 +1085,14 @@ export async function getStalePendingReservations(
        LEFT JOIN nextauth."User" u  ON r.customer_id = u.id
        LEFT JOIN public.aria_reminders_sent s
               ON s.reservation_code = r.reservation_code AND s.kind = 'pending_watch'
-      WHERE r.booking_status = $2
+      WHERE lower(btrim(r.booking_status)) = $2
         AND s.id IS NULL
+        AND r.expired_at IS NULL
         AND r.created_date < NOW() - ($1 || ' hours')::interval
         AND r.booking_date >= CURRENT_DATE
       ORDER BY r.created_date ASC
       LIMIT 100`,
-    [String(hours), status],
+    [String(hours), normalizarStatus(status)],
   );
   return rows;
 }
@@ -1043,11 +1157,32 @@ export async function loadPendingEmails(
 ): Promise<Array<{ chatId: string; record: PendingEmailRecord }>> {
   // Descarta os velhos demais (não responder backlog antigo) e devolve, por
   // conversa, apenas o registro MAIS RECENTE (o contexto de resposta certo).
-  await pool
-    .query(`DELETE FROM public.aria_pending_emails WHERE created_at < now() - ($1 || ' days')::interval`, [
-      String(Math.max(1, maxAgeDays)),
-    ])
-    .catch(() => {});
+  // Nada sai da fila em silêncio (ADR-014): o que passou do prazo vira escalação ATRASADO,
+  // com a idade e o remetente, para um humano responder — só então é removido.
+  try {
+    const dias = String(Math.max(1, maxAgeDays));
+    const { rows: velhos } = await pool.query(
+      `SELECT chat_id, MAX(created_at) AS ultimo, COUNT(*)::int AS n
+         FROM public.aria_pending_emails
+        WHERE created_at < now() - ($1 || ' days')::interval
+        GROUP BY chat_id`,
+      [dias],
+    );
+    for (const v of velhos) {
+      const horas = Math.round((Date.now() - new Date(v.ultimo).getTime()) / 3600000);
+      await pool
+        .query(
+          `INSERT INTO public.aria_escalations (tag, summary, phone, reservation_code)
+           VALUES ('ATRASADO', $1, $2, NULL)`,
+          [`E-mail sem resposta há ${horas}h (${v.n} mensagem(ns)) — a Aria não processou a tempo; responder por humano`, String(v.chat_id)],
+        )
+        .catch(() => {});
+      console.warn(`[email] pendente atrasado escalado (ATRASADO): ${String(v.chat_id).replace(/^(email:.{2})[^@]*/, "$1***")} · ${horas}h`);
+    }
+    await pool.query(`DELETE FROM public.aria_pending_emails WHERE created_at < now() - ($1 || ' days')::interval`, [dias]);
+  } catch {
+    /* fila indisponível: replay segue com o que der */
+  }
   const { rows } = await pool.query(
     `SELECT DISTINCT ON (chat_id) chat_id, payload
        FROM public.aria_pending_emails
@@ -1058,8 +1193,5 @@ export async function loadPendingEmails(
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-function generateReservationCode(): string {
-  // Short opaque code; collision-resistant enough for human use.
-  const uuid = randomUUID().replace(/-/g, "").slice(0, 8).toUpperCase();
-  return `TWK-${uuid}`;
-}
+// generateReservationCode() removida em 2026-09-21 junto com createReservation:
+// a Aria não cria reservas — só a plataforma o faz.

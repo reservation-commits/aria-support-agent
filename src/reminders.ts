@@ -20,6 +20,7 @@
 
 import { config } from "./config.js";
 import {
+  getDistinctBookingStatuses,
   getReservationsForReminder,
   getStalePendingReservations,
   logEscalation,
@@ -31,6 +32,8 @@ import { sendTemplate } from "./whatsapp.js";
 import { normalizePhone } from "./phone.js";
 import { languageForPhone } from "./locale.js";
 import { publish } from "./dashboard/events.js";
+import { registrarSaida, type OrigemSaida, type RegistroSaida } from "./outboundLog.js";
+import { avaliarTelefone, podeReceberWhatsApp } from "./phoneQuality.js";
 
 const KIND = "2h";
 const KIND_REVIEW = "6h_review";
@@ -57,6 +60,115 @@ function firstName(full: string | null): string {
   return full.trim().split(/\s+/)[0] ?? "";
 }
 
+/**
+ * Registra um problema da varredura de forma ALTA: console de erro, evento no
+ * painel e escalação persistida. Constituição, regra 6: checagem que não rodou
+ * é finding, nunca "ok" silencioso. Envio que não saiu é a mesma coisa.
+ */
+async function reportarFalha(rotulo: string, resumo: string): Promise<void> {
+  console.error(`[${rotulo}] ${resumo}`);
+  publish({ kind: "error", where: rotulo, message: resumo, at: new Date().toISOString() });
+  await logEscalation({ tag: "URGENTE", summary: `[${rotulo}] ${resumo}`, phone: "" }).catch(() => {});
+}
+
+/**
+ * Envio de um lote de templates proativos. Centralizado para que as três
+ * varreduras (lembrete, briefing, avaliação) compartilhem exatamente as mesmas
+ * travas: opt-out, fuso válido, dedup e contabilidade de falhas.
+ */
+async function enviarLote(p: {
+  kind: string;
+  rotulo: string;
+  origem: OrigemSaida;
+  rows: ReminderRow[];
+  template: string;
+  /** Nome do evento no painel — preservado por varredura para não mudar o log. */
+  evento: (locale: string) => string;
+  corpo: (r: ReminderRow) => string[];
+}): Promise<void> {
+  let enviados = 0;
+  let falhas = 0;
+  const semFuso: string[] = [];
+
+  // Todo desfecho é registrado, inclusive o não-envio: é ele que diz, no
+  // canário, se a trava está calibrada ou engolindo cliente legítimo.
+  const anotar = (desfecho: string, r: ReminderRow, extra: Partial<RegistroSaida> = {}) =>
+    registrarSaida({
+      origem: p.origem,
+      evento: p.kind,
+      reservationCode: r.reservation_code,
+      template: p.template,
+      desfecho,
+      ...extra,
+    });
+
+  for (const r of p.rows) {
+    if (!r.customer_phone) {
+      await anotar("sem_telefone", r, { motivo: "cliente sem telefone cadastrado" });
+      continue;
+    }
+
+    // Fuso desconhecido = não sabemos a que horas a reserva acontece. Mandar o
+    // lembrete na hora errada é pior do que não mandar: vira finding.
+    if (r.tz_valido === false) {
+      semFuso.push(r.reservation_code);
+      await anotar("sem_fuso", r, { motivo: `fuso não reconhecido no restaurante` });
+      continue;
+    }
+
+    // A MESMA trava de telefone do caminho por evento (Fase 0): só E.164 inequívoco e linha
+    // móvel. Sem isto, um número gravado sem "+" ou ambíguo (DDD brasileiro na posição do país)
+    // seria "normalizado" e entregue a um estranho — com nome, restaurante e data do cliente.
+    const tel = avaliarTelefone(r.customer_phone);
+    if (!podeReceberWhatsApp(tel)) {
+      await anotar("telefone_nao_enviavel", r, { qualidadeTelefone: tel.qualidade, pais: tel.pais, motivo: tel.motivo });
+      continue;
+    }
+    const to = tel.e164;
+    if (await isOptedOut(to)) {
+      await anotar("opt_out", r, { qualidadeTelefone: tel.qualidade, pais: tel.pais, motivo: "cliente optou por não receber" });
+      continue; // respeita opt-out
+    }
+
+    const locale = localeForPhone(to, config.reminders.defaultLocale);
+    const ok = await sendTemplate({ to, template: p.template, locale, bodyParams: p.corpo(r) });
+    if (!ok) {
+      falhas++;
+      await anotar("falha_envio", r, { locale, qualidadeTelefone: tel.qualidade, pais: tel.pais, motivo: "Cloud API recusou o envio" });
+      continue;
+    }
+
+    await markReminderSent(r.reservation_code, p.kind, to).catch(() => {});
+    enviados++;
+    await anotar("enviado", r, { locale, qualidadeTelefone: tel.qualidade, pais: tel.pais });
+    publish({
+      kind: "tool_call",
+      chat: to,
+      tool: p.evento(locale),
+      success: true,
+      latency_ms: 0,
+      at: new Date().toISOString(),
+    });
+  }
+
+  if (enviados > 0) console.log(`[${p.rotulo}] ${enviados} envio(s) '${p.kind}' concluído(s)`);
+
+  if (falhas > 0) {
+    await reportarFalha(
+      p.rotulo,
+      `${falhas} de ${p.rows.length} envios '${p.kind}' falharam na Cloud API — ` +
+        `verificar aprovação do template '${p.template}' nos idiomas em uso e a validade do número de destino.`,
+    );
+  }
+  if (semFuso.length > 0) {
+    await reportarFalha(
+      p.rotulo,
+      `${semFuso.length} reserva(s) sem fuso válido no restaurante — nada enviado, para não avisar na hora errada. ` +
+        `Códigos: ${semFuso.slice(0, 10).join(", ")}${semFuso.length > 10 ? "…" : ""}`,
+    );
+  }
+}
+
 async function sweep(): Promise<void> {
   const h = config.reminders.hoursBefore;
   let rows: ReminderRow[] = [];
@@ -70,36 +182,19 @@ async function sweep(): Promise<void> {
   }
   if (rows.length === 0) return;
 
-  let sent = 0;
-  for (const r of rows) {
-    if (!r.customer_phone) continue;
-    const to = normalizePhone(r.customer_phone);
-    if (await isOptedOut(to)) continue; // respeita opt-out
-    const locale = localeForPhone(to, config.reminders.defaultLocale);
-    const ok = await sendTemplate({
-      to,
-      template: config.reminders.template,
-      locale,
-      bodyParams: [
-        firstName(r.customer_name),
-        r.restaurant_name ?? "",
-        (r.reservation_time ?? "").slice(0, 5),
-      ],
-    });
-    if (ok) {
-      await markReminderSent(r.reservation_code, KIND, to).catch(() => {});
-      sent++;
-      publish({
-        kind: "tool_call",
-        chat: to,
-        tool: `reminder_${KIND}_${locale}`,
-        success: true,
-        latency_ms: 0,
-        at: new Date().toISOString(),
-      });
-    }
-  }
-  if (sent > 0) console.log(`[reminders] ${sent} lembrete(s) ${KIND} enviado(s)`);
+  await enviarLote({
+    kind: KIND,
+    rotulo: "reminders",
+    origem: "reminder",
+    rows,
+    template: config.reminders.template,
+    evento: (locale) => `reminder_${KIND}_${locale}`,
+    corpo: (r) => [
+      firstName(r.customer_name),
+      r.restaurant_name ?? "",
+      (r.reservation_time ?? "").slice(0, 5),
+    ],
+  });
 }
 
 /**
@@ -119,31 +214,20 @@ async function sweepBriefing(): Promise<void> {
   }
   if (rows.length === 0) return;
 
-  let sent = 0;
-  for (const r of rows) {
-    if (!r.customer_phone) continue;
-    const to = normalizePhone(r.customer_phone);
-    if (await isOptedOut(to)) continue; // respeita opt-out
-    const locale = localeForPhone(to, config.reminders.defaultLocale);
-    const dateStr = String(r.booking_date ?? "").slice(0, 10).split("-").reverse().slice(0, 2).join("/");
-    const ok = await sendTemplate({
-      to,
-      template: config.briefing.template,
-      locale,
-      bodyParams: [
-        firstName(r.customer_name),
-        r.restaurant_name ?? "",
-        dateStr,
-        (r.reservation_time ?? "").slice(0, 5),
-      ],
-    });
-    if (ok) {
-      await markReminderSent(r.reservation_code, KIND_BRIEFING, to).catch(() => {});
-      sent++;
-      publish({ kind: "tool_call", chat: to, tool: `briefing_${locale}`, success: true, latency_ms: 0, at: new Date().toISOString() });
-    }
-  }
-  if (sent > 0) console.log(`[briefing] ${sent} briefing(s) de véspera enviado(s)`);
+  await enviarLote({
+    kind: KIND_BRIEFING,
+    rotulo: "briefing",
+    origem: "briefing",
+    rows,
+    template: config.briefing.template,
+    evento: (locale) => `briefing_${locale}`,
+    corpo: (r) => [
+      firstName(r.customer_name),
+      r.restaurant_name ?? "",
+      String(r.booking_date ?? "").slice(0, 10).split("-").reverse().slice(0, 2).join("/"),
+      (r.reservation_time ?? "").slice(0, 5),
+    ],
+  });
 }
 
 /**
@@ -163,25 +247,15 @@ async function sweepReview(): Promise<void> {
   }
   if (rows.length === 0) return;
 
-  let sent = 0;
-  for (const r of rows) {
-    if (!r.customer_phone) continue;
-    const to = normalizePhone(r.customer_phone);
-    if (await isOptedOut(to)) continue; // respeita opt-out
-    const locale = localeForPhone(to, config.reminders.defaultLocale);
-    const ok = await sendTemplate({
-      to,
-      template: config.review.template,
-      locale,
-      bodyParams: [firstName(r.customer_name), r.restaurant_name ?? ""],
-    });
-    if (ok) {
-      await markReminderSent(r.reservation_code, KIND_REVIEW, to).catch(() => {});
-      sent++;
-      publish({ kind: "tool_call", chat: to, tool: `review_invite_${locale}`, success: true, latency_ms: 0, at: new Date().toISOString() });
-    }
-  }
-  if (sent > 0) console.log(`[review] ${sent} convite(s) de avaliação enviado(s)`);
+  await enviarLote({
+    kind: KIND_REVIEW,
+    rotulo: "review",
+    origem: "review",
+    rows,
+    template: config.review.template,
+    evento: (locale) => `review_invite_${locale}`,
+    corpo: (r) => [firstName(r.customer_name), r.restaurant_name ?? ""],
+  });
 }
 
 /**
@@ -226,6 +300,37 @@ async function sweepPending(): Promise<void> {
   if (rows.length > 0) console.log(`[pending-watch] ${rows.length} escalação(ões) PENDENTE_12H criada(s)`);
 }
 
+/**
+ * Confere, no boot, se os `booking_status` configurados existem de verdade em
+ * `reservations`. É a trava contra a classe de bug que manteve este módulo
+ * inerte: configuração que não casa com o banco fazia a varredura rodar,
+ * anunciar "ativo" e enviar ZERO para sempre, sem nenhum sinal.
+ *
+ * Não derruba o boot — a varredura pode ser o único aviso de que o banco mudou.
+ * Mas registra alto, para virar item de painel no mesmo dia.
+ */
+async function conferirStatusConfigurados(esperados: string[]): Promise<void> {
+  let existentes: string[];
+  try {
+    existentes = await getDistinctBookingStatuses();
+  } catch (err) {
+    console.warn("[reminders] não foi possível conferir os status do banco:", err instanceof Error ? err.message : err);
+    return;
+  }
+
+  const faltando = [...new Set(esperados.map((s) => s.trim().toLowerCase()))].filter(
+    (s) => !existentes.includes(s),
+  );
+  if (faltando.length === 0) return;
+
+  await reportarFalha(
+    "reminders.config",
+    `booking_status configurado não existe em reservations: ${faltando.join(", ")}. ` +
+      `Valores presentes no banco: ${existentes.join(", ")}. ` +
+      `Enquanto não casar, a varredura correspondente não encontra nenhuma reserva.`,
+  );
+}
+
 export function startReminders(): void {
   const remindersOn = config.reminders.enabled && !!config.reminders.template;
   const reviewOn = config.review.enabled && !!config.review.template;
@@ -252,6 +357,12 @@ export function startReminders(): void {
     if (pendingOn) void sweepPending();
   };
   setTimeout(() => {
+    const esperados = [
+      ...(remindersOn || briefingOn ? [config.reminders.status] : []),
+      ...(reviewOn ? [config.review.status] : []),
+      ...(pendingOn ? [config.pendingWatch.status] : []),
+    ];
+    void conferirStatusConfigurados(esperados);
     tick();
     setInterval(tick, intervalMs).unref();
   }, 45_000); // aguarda migrations + boot

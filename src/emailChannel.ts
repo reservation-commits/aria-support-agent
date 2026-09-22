@@ -27,7 +27,7 @@ import { config } from "./config.js";
 import { runAgent } from "./claude.js";
 import { emailChatId, emailIdentity } from "./identity.js";
 import { getOrRestoreHistory, setHistory } from "./sessions.js";
-import { enqueueMessage } from "./conversationQueue.js";
+import { enqueueMessage, isBusy } from "./conversationQueue.js";
 import { isHumanControlled } from "./handoff.js";
 import { isOutOfScope, textFromBlocks } from "./scopeScreen.js";
 import {
@@ -36,7 +36,7 @@ import {
   clearPendingEmails,
   loadPendingEmails,
 } from "./db.js";
-import { sanitizeEmailReply, looksLikeInternalNote } from "./format.js";
+import { sanitizeEmailReply, outboundGate, neutralizeSystemMarkers, idiomaProvavel } from "./format.js";
 import { recallMemories } from "./embeddings.js";
 import { resolveProfileKey } from "./identity.js";
 import { renderEmailHtml } from "./emailTemplate.js";
@@ -216,6 +216,7 @@ async function replayPendingEmails(): Promise<void> {
   for (const { chatId, record } of pending) {
     const ctx = record.ctx as unknown as ReplyContext;
     if (!ctx?.to) continue;
+    if (isBusy(chatId)) continue; // já está sendo tratado — não duplicar
     _replyContext.set(chatId, ctx);
     console.log(`[email] reenfileirando email pendente de ${ctx.to} (restart)`);
     enqueueMessage(
@@ -293,7 +294,9 @@ async function processInbound(gmailId: string): Promise<void> {
   const freshText = stripQuotedReply(rawBody);
 
   const blocks: AriaContentBlock[] = [];
-  if (freshText) blocks.push({ type: "text", text: freshText });
+  // O marcador "[Sistema: ...]" só pode vir do servidor. Qualquer um pode escrevê-lo
+  // num e-mail para support@ — neutralizar é a mesma defesa que o WhatsApp já tinha.
+  if (freshText) blocks.push({ type: "text", text: neutralizeSystemMarkers(freshText) });
 
   // Anexos de imagem/PDF → blocos multimodais (mesmo poder do WhatsApp).
   for (const att of findAttachments(msg.payload)) {
@@ -432,7 +435,7 @@ export async function handleInboundEmail(payload: unknown): Promise<void> {
   const freshText = stripQuotedReply(rawBody);
 
   const blocks: AriaContentBlock[] = [];
-  if (freshText) blocks.push({ type: "text", text: freshText });
+  if (freshText) blocks.push({ type: "text", text: neutralizeSystemMarkers(freshText) });
   for (const att of mail.attachments) {
     if (Buffer.byteLength(att.data, "base64") > MAX_ATTACHMENT_BYTES) continue;
     if (att.mimeType === "application/pdf") {
@@ -478,7 +481,7 @@ async function processEmailTurn(
   pushName: string | null,
   blocks: AriaContentBlock[],
 ): Promise<void> {
-  if (isHumanControlled(chatId)) {
+  if (await isHumanControlled(chatId)) {
     console.log(`[handoff] ${chatId} sob controle humano — Aria em silêncio`);
     // Humano assumiu — o email não fica pendente de replay.
     void clearPendingEmails(chatId).catch(() => {});
@@ -558,24 +561,27 @@ async function processEmailTurn(
     return;
   }
 
-  // Silêncio deliberado ou nota interna do agente — JAMAIS vai para o cliente.
-  // Registra no painel (aba Fora de escopo) para o operador auditar a decisão.
-  if (looksLikeInternalNote(clean)) {
-    console.log(`[email] silêncio do agente para ${ctx.to} — nota interna suprimida`);
+  // Porta única de saída, a mesma do WhatsApp: nota interna, relato de ação,
+  // dump de tool, marcador de silêncio, placeholder vazio ou resposta em idioma
+  // diferente do da mensagem recebida JAMAIS vão para o cliente. Fail-closed:
+  // na dúvida não envia, registra no painel e o MAESTRO revisa.
+  const portao = outboundGate(clean, textFromBlocks(blocks));
+  if (!portao.ok) {
+    console.warn(`[email] resposta barrada para ${ctx.to} — ${portao.motivo}`);
     void logScopeBlock({
       chatId,
       channel: "email",
       sender: ctx.to,
       subject: ctx.subject,
-      layer: "semantic",
-      reason: "Aria decidiu não responder (silêncio/nota interna suprimida)",
+      layer: "outbound",
+      reason: `resposta barrada na saída: ${portao.motivo}`,
       snippet: clean.slice(0, 300),
     }).catch(() => {});
     void clearPendingEmails(chatId).catch(() => {});
     return;
   }
 
-  const ok = await sendReply(ctx, clean);
+  const ok = await sendReply(ctx, clean, idiomaProvavel(textFromBlocks(blocks)) ?? undefined);
   if (ok) {
     void logMessage({ chatId, pushName, direction: "outbound", content: clean });
   }
@@ -586,7 +592,7 @@ async function processEmailTurn(
 
 // ─── Envio (mesma thread, headers de threading corretos) ────────────────────
 
-async function sendReply(ctx: ReplyContext, body: string): Promise<boolean> {
+async function sendReply(ctx: ReplyContext, body: string, idioma?: string): Promise<boolean> {
   // Modo n8n: o envio é delegado ao fluxo do n8n (nó Gmail já autenticado).
   if (config.email.n8nSendWebhook) {
     try {
@@ -596,7 +602,7 @@ async function sendReply(ctx: ReplyContext, body: string): Promise<boolean> {
           to: ctx.to,
           subject: replySubject(ctx.subject),
           text: body,
-          html: renderEmailHtml(body, undefined, config.publicUrl),
+          html: renderEmailHtml(body, idioma as never, config.publicUrl),
           gmailMessageId: ctx.gmailMessageId, // nó Gmail → Reply usa este id (mesma thread)
           threadId: ctx.threadId,
           // Caixa que RECEBEU o email — o fluxo de envio do n8n roteia por este
@@ -645,7 +651,7 @@ async function sendReply(ctx: ReplyContext, body: string): Promise<boolean> {
     'Content-Type: text/html; charset="UTF-8"',
     "Content-Transfer-Encoding: base64",
     "",
-    b64(renderEmailHtml(body, undefined, config.publicUrl)),
+    b64(renderEmailHtml(body, idioma as never, config.publicUrl)),
     `--${boundary}--`,
   ].join("\r\n");
 
@@ -714,8 +720,10 @@ export function startEmailChannel(): void {
     console.log(
       `[email] canal ativo (modo n8n): ${config.email.address || "caixa do n8n"} · entrada em POST /webhook/email · saída via ${config.email.n8nSendWebhook.split("?")[0]}`,
     );
-    // Replay de emails que um restart deixou sem resposta (após migrations).
+    // Replay de emails pendentes: no boot E periodicamente (ADR-014). Antes só no boot — um apagão
+    // de créditos em 06/09 deixou 12 e-mails parados por 4 dias porque o processo nunca reiniciou.
     setTimeout(() => void replayPendingEmails(), 20_000);
+    setInterval(() => void replayPendingEmails(), config.email.replayMinutes * 60_000).unref();
     return; // sem polling — o Gmail Trigger do n8n empurra os emails
   }
 
@@ -738,6 +746,7 @@ export function startEmailChannel(): void {
     void replayPendingEmails();
     void sweep();
     setInterval(() => void sweep(), intervalMs).unref();
+    setInterval(() => void replayPendingEmails(), config.email.replayMinutes * 60_000).unref();
   }, 15_000); // aguarda migrations/boot
 
   console.log(

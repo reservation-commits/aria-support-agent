@@ -11,7 +11,7 @@ export type AriaEvent =
   | { kind: "tool_call";     chat: string | null; tool: string; success: boolean; latency_ms: number; at: string }
   | { kind: "escalation";    chat: string | null; tag: string; summary: string; at: string }
   | { kind: "error";         where: string; message: string; at: string }
-  | { kind: "health_check";  overall_ok: boolean; db_ok: boolean; whatsapp_ok: boolean; at: string }
+  | { kind: "health_check";  overall_ok: boolean; db_ok: boolean; whatsapp_ok: boolean; anthropic_ok?: boolean; at: string }
   | { kind: "test_run";      passed: number; failed: number; total: number; at: string }
   | { kind: "suggestion_new"; title: string; category: string; priority: string; at: string }
   | { kind: "scope_blocked"; chat: string; channel: string; sender: string | null; subject: string | null; reason: string; layer: string; at: string };

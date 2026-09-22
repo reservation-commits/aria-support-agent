@@ -3,7 +3,9 @@ import { config } from "./config.js";
 import { systemPromptFor } from "./systemPrompt.js";
 import { buildTemporalContext } from "./datetime.js";
 import { tools, runTool } from "./tools.js";
-import { recordLlmUsage } from "./db.js";
+import { logEscalation, recordLlmUsage } from "./db.js";
+import { publish } from "./dashboard/events.js";
+import { compactToolResults } from "./historyTrim.js";
 import { effectiveModel, recordSpend } from "./costGuard.js";
 import { contactKey, type AgentIdentity, type Channel } from "./identity.js";
 import { SCOPE_CLASSIFIER_SYSTEM, parseScopeVerdict, type ScopeVerdict } from "./scopeGuard.js";
@@ -67,11 +69,39 @@ async function createWithRetry(
     } catch (err) {
       const status = (err as { status?: number }).status;
       const transient = status === undefined || status === 429 || status >= 500;
-      if (!transient || attempt >= maxRetries) throw err;
+      if (!transient || attempt >= maxRetries) {
+        await alertarModeloIndisponivel(status, err);
+        throw err;
+      }
       const delay = 1_000 * 2 ** attempt; // 1s, 2s
       console.warn(`[claude] erro transitório (status ${status ?? "rede"}) — retry em ${delay}ms`);
       await sleep(delay);
     }
+  }
+}
+
+/**
+ * Erro definitivo do modelo = cliente sem resposta. Antes, isto era um console.error e
+ * mais nada: entre 18 e 22/09/2026 a conta ficou sem crédito (HTTP 400 "credit balance is
+ * too low") e nove conversas ficaram sem resposta sem que ninguém fosse avisado.
+ * Agora vira escalação URGENTE no painel (dedup de 1h para não inundar), com o motivo
+ * classificado — crédito, chave, modelo inexistente — e a ação.
+ */
+let ultimoAlertaModelo = 0;
+async function alertarModeloIndisponivel(status: number | undefined, err: unknown): Promise<void> {
+  const msg = String((err as { message?: string })?.message ?? err).slice(0, 200);
+  const motivo =
+    /credit balance/i.test(msg) ? "SEM CRÉDITO na conta da Anthropic — recarregar em console.anthropic.com"
+    : status === 401 ? "chave de API inválida (ANTHROPIC_API_KEY)"
+    : status === 403 ? "chave sem permissão para o modelo"
+    : status === 404 ? "modelo não encontrado (ANTHROPIC_MODEL)"
+    : `erro ${status ?? "de rede"}`;
+  const resumo = `[claude] modelo indisponível: ${motivo}. Detalhe: ${msg}`;
+  console.error(resumo);
+  publish({ kind: "error", where: "claude", message: resumo, at: new Date().toISOString() });
+  if (Date.now() - ultimoAlertaModelo > 3_600_000) {
+    ultimoAlertaModelo = Date.now();
+    await logEscalation({ tag: "URGENTE", summary: resumo, phone: "" }).catch(() => {});
   }
 }
 
@@ -242,14 +272,21 @@ export async function runAgent(
       .trim();
 
     flushUsage(usage, chatKey, model);
-    return { reply: reply || (sentViaTool ? "" : "..."), updatedHistory: messages };
+    // Resposta textual vazia NÃO vira conteúdo. O antigo placeholder "..." era
+    // entregue como e-mail oficial da marca, com cabeçalho e assinatura, porque
+    // no canal de e-mail as tools send_* não existem e sentViaTool é sempre false.
+    // Vazio é tratado pelo portão de saída como supressão, que é o certo.
+    // O histórico guardado leva os tool_results COMPACTADOS: o modelo já os viu
+    // inteiros neste turno; nos seguintes, o resultado bruto de uma busca de
+    // restaurantes só engorda o contexto (média de 53 mil tokens por turno no
+    // WhatsApp em set/2026, contra 24 mil em julho).
+    return { reply: reply || "", updatedHistory: compactToolResults(messages) };
   }
 
-  console.warn("[claude] hit MAX_TOOL_ITERATIONS — returning fallback message");
+  // Fallback de esgotamento de iterações: era uma frase fixa EM PORTUGUÊS, entregue
+  // como carta oficial a um cliente francês, alemão ou italiano. Sem texto, o portão
+  // de saída suprime e registra — melhor não responder do que responder no idioma errado.
+  console.warn("[claude] hit MAX_TOOL_ITERATIONS — sem resposta (supressão registrada na saída)");
   flushUsage(usage, chatKey, model);
-  return {
-    reply:
-      "Estou verificando alguns detalhes do seu pedido. Já vou retornar com a resposta — um momento, por favor.",
-    updatedHistory: messages,
-  };
+  return { reply: "", updatedHistory: compactToolResults(messages) };
 }

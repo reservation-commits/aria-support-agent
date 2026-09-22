@@ -1,0 +1,29 @@
+# CI da Aria — typecheck + testes em todo push/PR. Sem verde, sem deploy.
+# Fica pronto para o dia em que este repositório ganhar um remoto no GitHub
+# (org reservation-commits, como CLAVIS, Quill e Atlas). Não custa tokens: nenhuma
+# etapa chama o modelo nem o banco.
+name: ci
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Testes (169 casos, sem banco e sem modelo)
+        run: npm test
+      - name: Build (o mesmo do Dockerfile)
+        run: npm run build

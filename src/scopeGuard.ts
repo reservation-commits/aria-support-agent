@@ -146,7 +146,11 @@ const BULK_BODY_MARKERS: RegExp[] = [
  * de alta confiança, custo zero.
  */
 const AUTOMATED_REPORT_SUBJECTS: RegExp[] = [
-  /^\s*(re:\s*)?report domain:/i, // relatório agregado DMARC (Google/Yahoo/etc.)
+  // Relatório agregado DMARC (Google/Yahoo/Microsoft…). O prefixo opcional entre
+  // colchetes existe porque a Microsoft manda "[Preview] Report Domain: …" — 40
+  // desses escaparam para a camada semântica (paga) até 2026-09-22.
+  /^\s*(\[[^\]]{1,20}\]\s*)?(re:\s*)?report domain:/i,
+  /^\s*(\[[^\]]{1,20}\]\s*)?report-id:/i,
   /\bdmarc\b.*\breport\b|\breport\b.*\bdmarc\b/i,
   /\b(aggregate|tls)\s+report\b/i,
   /\bsmtp\s+tls\s+report\b/i,

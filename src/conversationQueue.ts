@@ -37,6 +37,12 @@ type ChatState = {
 
 const states = new Map<string, ChatState>();
 
+/** Há turno rodando ou mensagens bufferizadas para este chat? (usado pelo replay periódico da fila) */
+export function isBusy(chatId: string): boolean {
+  const st = states.get(chatId);
+  return !!st && (st.processing || st.buffer.length > 0 || st.timer !== null);
+}
+
 /**
  * Adiciona o conteúdo de uma mensagem recebida ao buffer da conversa e
  * (re)agenda o flush. O processor é chamado uma única vez por rajada.

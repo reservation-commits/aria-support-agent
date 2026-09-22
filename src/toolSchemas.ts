@@ -151,7 +151,7 @@ export const tools: Anthropic.Tool[] = [
   {
     name: "search_restaurants",
     description:
-      "Busca ESTRUTURADA de restaurantes por cidade, país, parte do nome ou cozinha exata. Use quando o cliente cita um critério objetivo (ex: 'tem algum restaurante japonês em Paris?', 'o restaurante chama Le Bernardin'). Para pedidos por VIBE/ocasião em linguagem natural, prefira discover_restaurants.",
+      "Busca ESTRUTURADA de restaurantes por cidade, país, parte do nome ou cozinha exata. Use quando o cliente cita um critério objetivo (ex: 'tem algum restaurante japonês em Paris?', 'o restaurante chama Le Bernardin'). Para pedidos por VIBE/ocasião em linguagem natural, prefira discover_restaurants. Cada resultado traz pedidos_90d, aceitos_90d e confirma_pedidos (true = a casa de fato confirma os pedidos da plataforma; as que confirmam vêm primeiro). Ao oferecer ALTERNATIVA a quem ficou sem mesa, use só casas com confirma_pedidos=true. Se nenhuma tiver, não prometa nada: diga que o cliente pode pedir a mesa pela página e que o restaurante confirma por e-mail. Nenhum destes campos é disponibilidade de mesa.",
     input_schema: {
       type: "object",
       properties: {
@@ -166,7 +166,7 @@ export const tools: Anthropic.Tool[] = [
   {
     name: "discover_restaurants",
     description:
-      "Descoberta por RELEVÂNCIA em linguagem natural, ranqueada sobre a descrição (about_text), nome, cidade e país dos restaurantes da TWK. Use quando o cliente descreve uma VIBE, ocasião ou critério subjetivo em vez de um nome/cozinha exata — ex: 'um lugar romântico com vista', 'algo animado para ir com amigos', 'bom para fechar um negócio', 'jantar tranquilo e intimista'. Passe a descrição do cliente em `query` (pode ser a frase dele). Filtre por cidade/país quando o cliente indicar. Só retorna restaurantes cadastrados na plataforma.",
+      "Descoberta por RELEVÂNCIA em linguagem natural, ranqueada sobre a descrição (about_text), nome, cidade e país dos restaurantes da TWK. Use quando o cliente descreve uma VIBE, ocasião ou critério subjetivo em vez de um nome/cozinha exata — ex: 'um lugar romântico com vista', 'algo animado para ir com amigos', 'bom para fechar um negócio', 'jantar tranquilo e intimista'. Passe a descrição do cliente em `query` (pode ser a frase dele). Filtre por cidade/país quando o cliente indicar. Só retorna restaurantes cadastrados na plataforma. Cada resultado traz pedidos_90d, aceitos_90d e confirma_pedidos (true = a casa de fato confirma os pedidos da plataforma). Ao oferecer ALTERNATIVA a quem ficou sem mesa, use só casas com confirma_pedidos=true. Se nenhuma tiver, não prometa nada: diga que o cliente pode pedir a mesa pela página e que o restaurante confirma por e-mail. Nenhum destes campos é disponibilidade de mesa.",
     input_schema: {
       type: "object",
       properties: {
@@ -439,7 +439,7 @@ export const tools: Anthropic.Tool[] = [
   {
     name: "escalate_to_human",
     description:
-      "Escalar para a equipe humana com tag e SLA. SEMPRE comunique ao cliente o próximo passo e o prazo antes de chamar (ou na mesma mensagem). Tags válidas: URGENTE, PENDENTE_12H, MODIFICACAO, PEDIDO_ESPECIAL, ACESSIBILIDADE, PARCEIRO_B2B.",
+      "Escalar para a equipe humana com tag e SLA. SEMPRE comunique ao cliente o próximo passo e o prazo antes de chamar (ou na mesma mensagem). Tags válidas: URGENTE, PENDENTE_12H, MODIFICACAO, PEDIDO_ESPECIAL, ACESSIBILIDADE, PARCEIRO_B2B, REMOCAO_LISTAGEM (estabelecimento pede para sair / não consentiu / proteção de dados — FLUXO 7), CORRECAO_LISTAGEM (estabelecimento pede correção de dados da página).",
     input_schema: {
       type: "object",
       properties: {
@@ -452,6 +452,8 @@ export const tools: Anthropic.Tool[] = [
             "PEDIDO_ESPECIAL",
             "ACESSIBILIDADE",
             "PARCEIRO_B2B",
+            "REMOCAO_LISTAGEM",
+            "CORRECAO_LISTAGEM",
           ],
         },
         summary: { type: "string", description: "Resumo curto do caso para a equipe humana" },
@@ -459,6 +461,21 @@ export const tools: Anthropic.Tool[] = [
         reservation_code: { type: "string" },
       },
       required: ["tag", "summary", "customer_phone"],
+    },
+  },
+  {
+    name: "manage_reservation",
+    description:
+      "SÓ NO CANAL DE E-MAIL e SÓ quando quem escreve é o RESTAURANTE respondendo a um pedido de mesa (thread 'Great news!…'/'Pending Request…'). Aplica a decisão da casa pela plataforma, exatamente como o botão do /r/: accept (aceita), decline (recusa) ou reschedule + new_time HH:MM (propõe outro horário — o cliente recebe e-mail com Aceitar/Recusar e decide; o status só muda quando ele clicar). O servidor confere que o remetente é o e-mail da casa no catálogo; se não for, recusa e você orienta a casa a usar o link do /r/. Depois de chamar, responda ao restaurante: agradeça, diga que o cliente foi avisado e inclua o convite à conta gratuita (2 minutos).",
+    input_schema: {
+      type: "object",
+      properties: {
+        reservation_code: { type: "string", description: "Código da reserva citado na thread (ex.: VK6BEDL6)" },
+        action: { type: "string", enum: ["accept", "decline", "reschedule"] },
+        new_time: { type: "string", description: "Só para reschedule: HH:MM (24h). Se a casa deu uma janela ou dois turnos, escolha o mais próximo do horário pedido pelo cliente." },
+        reason: { type: "string", description: "Trecho literal do e-mail da casa que justifica a ação" },
+      },
+      required: ["reservation_code", "action", "reason"],
     },
   },
 ];

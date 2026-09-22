@@ -1,6 +1,5 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import {
-  cancelReservation,
   findBookingLinkByName,
   findReservationByCode,
   findReservationsByEmail,
@@ -22,6 +21,7 @@ import {
   upsertCustomerProfile,
 } from "./db.js";
 import { logToolCall, logMessage } from "./dashboard/logger.js";
+import { emailDomainMatches, fetchReservation, manageReservation } from "./platformReservation.js";
 import { publish } from "./dashboard/events.js";
 import {
   sendCtaUrl,
@@ -29,7 +29,20 @@ import {
   sendInteractiveList,
   sendLocation,
 } from "./whatsapp.js";
-import { sanitizeReply } from "./format.js";
+import { sanitizeReply, motivoDeBloqueio } from "./format.js";
+
+/**
+ * Texto que sai por uma tool send_* (lista, botões, CTA) chega ao aparelho antes
+ * da resposta final e não era filtrado por nada além do sanitizador. Recusar a
+ * tool devolve o controle ao modelo; enviar seria irreversível.
+ */
+function recusaSeNotaInterna(texto: string): { ok: false; error: string } | null {
+  if (!texto) return null;
+  const motivo = motivoDeBloqueio(texto);
+  if (!motivo) return null;
+  console.warn(`[tools] corpo de mensagem rica barrado — ${motivo}`);
+  return { ok: false, error: `Este texto não pode ser enviado ao cliente (${motivo}). Escreva uma mensagem dirigida a ele, no idioma dele, sem relato de ação interna.` };
+}
 import {
   buildMapsLink,
   computeRoute,
@@ -102,6 +115,15 @@ function computeDeparture(
   return { suggested_departure: `${hh}:${mm}`, crossedMidnight: depMin < 0 };
 }
 
+/**
+ * Recusa estruturada quando uma tool de lookup exigiria confiar em identidade
+ * digitada pelo MODELO (email/telefone/nome). Devolvida como dado (ok:true)
+ * para o modelo explicar ao cliente o caminho correto (ex.: código da reserva).
+ */
+function identityRefusal(reason: string): ToolResult {
+  return { ok: true, data: { refused: true, reason } };
+}
+
 function safeStringify(x: unknown): string {
   try {
     return JSON.stringify(x);
@@ -136,7 +158,14 @@ async function _execTool(
         return { ok: true, data: rows };
       }
       case "find_reservations_by_email": {
-        const rows = await findReservationsByEmail(String(input.email));
+        // Só o e-mail confiável do canal — nunca o digitado pelo modelo. No
+        // WhatsApp (sem e-mail confiável) o fluxo é o código da reserva (bearer).
+        if (!trustedEmail) {
+          return identityRefusal(
+            "Consulta por e-mail indisponível neste canal. Peça o código da reserva ao cliente e use find_reservation_by_code.",
+          );
+        }
+        const rows = await findReservationsByEmail(trustedEmail);
         return { ok: true, data: rows };
       }
       case "find_reservations_by_phone": {
@@ -173,12 +202,25 @@ async function _execTool(
       }
       // cancel_reservation removido intencionalmente:
       // o agente redireciona o cliente para theworldkeys.com/users/reservations.
-      // A função cancelReservation em db.ts é mantida para uso interno futuro.
+      // As funções de escrita direta em `reservations` foram REMOVIDAS de db.ts em
+      // 2026-09-21 (auditoria): eram código morto com poder de escrita, e o ADR-004
+      // manda que só a plataforma escreva em reservas — ver manage_reservation.
       case "search_reservations": {
+        // Filtros que identificam o CLIENTE (nome/email/telefone) são forçados
+        // à identidade confiável do canal — nunca aos valores do modelo.
+        const wantsCustomerFilter =
+          input.customer_name != null ||
+          input.customer_email != null ||
+          input.customer_phone != null;
+        if (wantsCustomerFilter && !trustedEmail && !trustedPhone) {
+          return identityRefusal(
+            "Busca por dados do cliente exige a identidade confiável do canal ou o código da reserva (find_reservation_by_code).",
+          );
+        }
         const rows = await searchReservations({
-          customerName: input.customer_name as string | undefined,
-          customerEmail: input.customer_email as string | undefined,
-          customerPhone: input.customer_phone as string | undefined,
+          customerName: undefined,
+          customerEmail: wantsCustomerFilter ? (trustedEmail ?? undefined) : undefined,
+          customerPhone: wantsCustomerFilter ? (trustedPhone ?? undefined) : undefined,
           reservationCode: input.reservation_code as string | undefined,
           restaurantName: input.restaurant_name as string | undefined,
           dateFrom: input.date_from as string | undefined,
@@ -395,9 +437,15 @@ async function _execTool(
         return { ok: true, data: rows };
       }
       case "find_user": {
+        // Só a identidade confiável do canal — nunca email/telefone do modelo.
+        if (!trustedEmail && !trustedPhone) {
+          return identityRefusal(
+            "Consulta de cadastro exige a identidade confiável do canal (telefone do WhatsApp ou remetente do e-mail).",
+          );
+        }
         const rows = await findUser({
-          email: input.email as string | undefined,
-          phone: input.phone as string | undefined,
+          email: trustedEmail ?? undefined,
+          phone: trustedPhone ?? undefined,
         });
         return { ok: true, data: rows };
       }
@@ -445,6 +493,8 @@ async function _execTool(
           return { ok: false, error: "Nenhum restaurante válido para os IDs informados. Use IDs vindos das tools de busca." };
         }
         const body = sanitizeReply(String(input.body ?? ""));
+        const recusa = recusaSeNotaInterna(body);
+        if (recusa) return recusa;
         const sent = await sendInteractiveList(waTo, {
           body: body || "Aqui estão as opções da nossa curadoria:",
           buttonLabel: String(input.button_label ?? "Ver opções"),
@@ -478,6 +528,8 @@ async function _execTool(
         if (buttons.length === 0) return { ok: false, error: "Informe ao menos um botão com label." };
         const body = sanitizeReply(String(input.body ?? ""));
         if (!body) return { ok: false, error: "Informe o texto (body) da mensagem." };
+        const recusaBotoes = recusaSeNotaInterna(body);
+        if (recusaBotoes) return recusaBotoes;
         const sent = await sendInteractiveButtons(waTo, body, buttons);
         if (!sent) return { ok: false, error: "Falha ao enviar os botões. Faça a pergunta em texto normal." };
         void logMessage({
@@ -501,10 +553,12 @@ async function _execTool(
           return {
             ok: false,
             error:
-              "Restaurante sem url_page_twk cadastrada. NÃO gere link manualmente. Diga que está providenciando o link oficial e escale com PEDIDO_ESPECIAL.",
+              "Restaurante sem url_page_twk cadastrada. NÃO gere link manualmente. Diga com honestidade que a página de reserva dele ainda não está ativa, ofereça alternativas equivalentes e registre com log_attendance_event. Nunca prometa link futuro.",
           };
         }
         const body = sanitizeReply(String(input.body ?? "")) || `Sua reserva no *${r.name}* é feita direto na página oficial — escolha data, horário e número de pessoas.`;
+        const recusaCta = recusaSeNotaInterna(body);
+        if (recusaCta) return recusaCta;
         const sent = await sendCtaUrl(waTo, {
           body,
           displayText: "Reservar",
@@ -560,15 +614,58 @@ async function _execTool(
         });
         return { ok: true, data: res };
       }
+      case "manage_reservation": {
+        // Só o canal de e-mail e só o restaurante da reserva podem decidir por ela (ADR-014).
+        if (identity?.channel !== "email" || !trustedEmail) {
+          return identityRefusal("manage_reservation só existe no canal de e-mail, para respostas do restaurante.");
+        }
+        const code = String(input.reservation_code ?? "").trim().toUpperCase();
+        const action = String(input.action ?? "");
+        const newTime = input.new_time ? String(input.new_time) : undefined;
+        const reason = String(input.reason ?? "");
+        if (reason.length < 8) return { ok: false, error: "reason obrigatório: cite o trecho do e-mail da casa." };
+        let reserva;
+        try {
+          reserva = await fetchReservation(code);
+        } catch (e) {
+          return { ok: false, error: `não consegui ler a reserva ${code} na plataforma: ${e instanceof Error ? e.message : e}` };
+        }
+        const rid = String(reserva.restaurant?.restaurant_id ?? "");
+        const info = rid ? await getRestaurantInfo(rid) : [];
+        const catalogEmail = (info[0] as { email_for_reservations?: string } | undefined)?.email_for_reservations ?? reserva.restaurant?.email_for_reservations ?? null;
+        if (!emailDomainMatches(trustedEmail, catalogEmail)) {
+          return identityRefusal(
+            "O remetente não é o e-mail de reservas desta casa no catálogo — não posso aplicar a decisão por e-mail. Oriente o restaurante a responder pelo link do pedido (theworldkeys.com/r/<código>).",
+          );
+        }
+        const out = await manageReservation({ code, action: action as "accept" | "decline" | "reschedule", newTime });
+        await logAttendanceEvent({
+          description: `RESTAURANTE POR E-MAIL [${action}${newTime ? " " + newTime : ""}] ${code} · ${reserva.restaurant?.name ?? rid} · motivo: ${reason.slice(0, 160)} · ${out.ok ? "ok status=" + out.status : "erro: " + out.error}`,
+          restaurantId: rid || null,
+          reservationId: null,
+        }).catch(() => {});
+        if (!out.ok) return out;
+        return { ok: true, data: { applied: action, new_time: newTime ?? null, status_now: out.status, note: action === "reschedule" ? "O cliente recebeu e-mail com Aceitar/Recusar o novo horário; o status muda quando ele decidir." : "Cliente avisado pela plataforma." } };
+      }
       case "escalate_to_human": {
         const phone = trustedPhone ?? trustedEmail ?? String(input.customer_phone ?? "");
         // Fonte de verdade do painel: tabela própria aria_escalations.
-        await logEscalation({
-          tag: String(input.tag),
-          summary: String(input.summary ?? ""),
-          phone,
-          reservationCode: (input.reservation_code as string | undefined) ?? null,
-        }).catch((e) => console.error("[escalate] falha ao gravar aria_escalations", e));
+        // Fail-closed: se este INSERT falhar, ninguém do time seria avisado —
+        // devolve erro para o modelo comunicar o cliente e tentar de novo.
+        try {
+          await logEscalation({
+            tag: String(input.tag),
+            summary: String(input.summary ?? ""),
+            phone,
+            reservationCode: (input.reservation_code as string | undefined) ?? null,
+          });
+        } catch (e) {
+          console.error("[escalate] falha ao gravar aria_escalations", e);
+          return {
+            ok: false,
+            error: "Falha ao registrar a escalação — nenhum atendente foi notificado. Tente novamente.",
+          };
+        }
 
         // Audit log legado (best-effort; pode falhar se o schema de update_events diferir).
         await logAttendanceEvent({
@@ -580,7 +677,8 @@ async function _execTool(
         console.warn("[escalate]", {
           tag: input.tag,
           summary: input.summary,
-          customer_phone: phone,
+          // Contato mascarado no log — só os últimos 4 dígitos.
+          customer_phone: phone.length > 4 ? `***${phone.slice(-4)}` : phone,
           reservation_code: input.reservation_code,
         });
 

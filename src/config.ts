@@ -107,11 +107,16 @@ export const config = {
     template: process.env.REMINDERS_TEMPLATE ?? "",
     // Idioma de fallback quando não der para inferir pelo país, ou quando o
     // idioma do país ainda não tem tradução aprovada no template.
-    defaultLocale: process.env.REMINDERS_DEFAULT_LOCALE ?? "pt_BR",
+    //
+    // Padrão INGLÊS, não pt_BR: a validação da base (2026-09-21,
+    // docs/notificacoes/fase0-validacao-telefones.md) mostrou que os telefones
+    // entregáveis são US 3.938 · GB 1.713 · SG 1.215 · FR 751 · CA 722 ·
+    // AU 709 · HK 648 · IT 502 · DE 489 · BR 429. Português era o 10º grupo.
+    defaultLocale: process.env.REMINDERS_DEFAULT_LOCALE ?? "en",
     // Idiomas REALMENTE aprovados no template (no WhatsApp Manager). O agente só
     // envia nestes; idioma de país fora desta lista cai no defaultLocale.
-    // Comece com o que existe (pt_BR) e amplie conforme aprovar (ex: "pt_BR,en,es,fr").
-    locales: (process.env.REMINDERS_LOCALES ?? "pt_BR")
+    // Comece com o que existe (en) e amplie conforme aprovar (ex: "en,fr,pt_BR,es").
+    locales: (process.env.REMINDERS_LOCALES ?? "en")
       .split(",").map((s) => s.trim()).filter(Boolean),
     // Quantas horas antes da reserva enviar o lembrete.
     hoursBefore: Number(process.env.REMINDERS_HOURS_BEFORE ?? 2),
@@ -119,6 +124,38 @@ export const config = {
     status: process.env.REMINDERS_STATUS ?? "accept",
     // Intervalo de varredura do scheduler (min). Menor = lembrete mais perto das 2h.
     sweepMinutes: Number(process.env.REMINDERS_SWEEP_MINUTES ?? 20),
+  },
+
+  reservationEvents: {
+    // Notificação TRANSACIONAL por evento: o n8n — que já dispara o e-mail em
+    // cada transição da reserva — avisa a Aria em POST /webhook/reservation-event
+    // e ela manda o template de WhatsApp. Um dono da mensagem, dois canais.
+    //
+    // As varreduras de reminders.ts são por TEMPO (2h antes, véspera, pós). Esta
+    // é por EVENTO: é ela que diz "seu pedido foi aceito" no instante em que foi,
+    // que é o que o cliente espera do WhatsApp.
+    //
+    // DESLIGADO por padrão. Ligar exige aprovação do fundador (constituição:
+    // "novo fluxo orquestrado entrando em operação").
+    enabled: (process.env.RESERVATION_EVENTS_ENABLED ?? "false").toLowerCase() === "true",
+    // Segredo compartilhado (header x-aria-secret). Sem ele a rota responde 404:
+    // não existe caminho de envio sem autenticação.
+    secret: process.env.RESERVATION_EVENTS_SECRET ?? "",
+    // Teto de envios por dia (UTC). 0 = sem teto. Rede de segurança do canário
+    // contra tempestade (n8n re-tentando em laço, importação em lote). O volume
+    // normal é ~13 pedidos/dia; 25 dá folga e ainda barra um surto.
+    // FAIL-CLOSED: se o teto está ligado e não dá para contar, NÃO envia — teto
+    // que não se consegue impor não é teto.
+    dailyCap: Number(process.env.RESERVATION_EVENTS_DAILY_CAP ?? 0),
+    // Nome do template aprovado na Meta para cada evento. Evento sem template
+    // configurado não envia nada — e registra finding, nunca silêncio.
+    templates: {
+      pedido_recebido: process.env.RESERVATION_EVENT_TEMPLATE_RECEBIDO ?? "",
+      aceito: process.env.RESERVATION_EVENT_TEMPLATE_ACEITO ?? "",
+      recusado: process.env.RESERVATION_EVENT_TEMPLATE_RECUSADO ?? "",
+      reagendamento_proposto: process.env.RESERVATION_EVENT_TEMPLATE_REAGENDAMENTO ?? "",
+      cancelado: process.env.RESERVATION_EVENT_TEMPLATE_CANCELADO ?? "",
+    } as Record<string, string>,
   },
 
   email: {
@@ -157,7 +194,19 @@ export const config = {
     pollSeconds: Number(process.env.EMAIL_POLL_SECONDS ?? 60),
     // Só processa emails mais novos que N dias (proteção contra responder um
     // backlog antigo de não-lidos ao ligar o canal pela primeira vez).
-    maxAgeDays: Number(process.env.EMAIL_MAX_AGE_DAYS ?? 2),
+    maxAgeDays: Number(process.env.EMAIL_MAX_AGE_DAYS ?? 7),
+    // replay da fila pendente em runtime (minutos). 0 desliga.
+    replayMinutes: Math.max(1, Number(process.env.EMAIL_REPLAY_MINUTES ?? 10)),
+  },
+
+  n8nApi: {
+    // API REST do n8n para o painel ler as execuções do rastreador de cliques
+    // da campanha (workflow do webhook /go). Somente leitura. Sem estas duas
+    // variáveis, o bloco Campanha mostra os envios mas avisa que cliques não
+    // estão configurados.
+    apiUrl: (process.env.N8N_API_URL ?? "").replace(/\/+$/, ""),
+    apiKey: process.env.N8N_API_KEY ?? "",
+    clickWorkflowId: process.env.N8N_CLICK_WORKFLOW_ID ?? "HoFjhfqzPmCAkrnZ",
   },
 
   pendingWatch: {

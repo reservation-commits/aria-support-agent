@@ -97,7 +97,9 @@ export type LogScopeBlockInput = {
   channel: string;
   sender?: string | null;
   subject?: string | null;
-  layer: "structural" | "semantic";
+  // "outbound" = barrado na SAÍDA (nota interna, idioma divergente, dump de tool).
+  // As duas primeiras barram na entrada; esta protege o cliente do que a Aria escreveu.
+  layer: "structural" | "semantic" | "outbound";
   reason: string;
   snippet?: string | null;
 };

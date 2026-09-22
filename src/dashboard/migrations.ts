@@ -182,6 +182,16 @@ export async function runDashboardMigrations(): Promise<void> {
         ON public.aria_escalations (created_at DESC);
     `);
 
+    // Handoff humano persistido — após restart a Aria continua em silêncio nos
+    // chats assumidos por um atendente (src/handoff.ts consulta em miss).
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS public.aria_handoffs (
+        phone    TEXT PRIMARY KEY,
+        operator TEXT,
+        until    TIMESTAMPTZ NOT NULL
+      );
+    `);
+
     // Consentimento de outbound — opt-out de lembretes/avaliações (WhatsApp/LGPD).
     await client.query(`
       CREATE TABLE IF NOT EXISTS public.aria_contact_consent (
@@ -359,6 +369,128 @@ export async function runDashboardMigrations(): Promise<void> {
       console.warn(
         "[dashboard] extensão 'unaccent' indisponível (sem privilégio?) — busca seguirá sem normalização de acentos",
       );
+    }
+
+    // ─── Rastreamento da campanha de fundadores ──────────────────────────────
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS public.aria_campaign_sends (
+        id BIGSERIAL PRIMARY KEY,
+        gmail_id TEXT NOT NULL UNIQUE,
+        restaurant_id TEXT NOT NULL,
+        restaurant_name TEXT,
+        campaign TEXT NOT NULL,
+        wave TEXT NOT NULL,
+        touch_no INTEGER NOT NULL DEFAULT 1,
+        recipient TEXT NOT NULL,
+        language TEXT,
+        sent_at DATE NOT NULL,
+        status TEXT NOT NULL DEFAULT 'enviado',
+        note TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS aria_campaign_sends_rest_idx
+        ON public.aria_campaign_sends (restaurant_id);
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS public.aria_campaign_clicks (
+        id BIGSERIAL PRIMARY KEY,
+        execution_id TEXT NOT NULL UNIQUE,
+        campaign TEXT NOT NULL,
+        restaurant_id TEXT NOT NULL,
+        clicked_at TIMESTAMPTZ NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS aria_campaign_clicks_rest_idx
+        ON public.aria_campaign_clicks (restaurant_id, clicked_at DESC);
+    `);
+    // ── Log de SAÍDA proativa (lembretes, briefing, avaliação e eventos) ────
+    // Sem isto, o desfecho de cada envio só existia no console e num buffer em
+    // memória que morre no deploy — e não se avalia um canário com isso.
+    // Registra TODO desfecho, inclusive os que não enviaram nada: "não enviei
+    // porque o telefone é ambíguo" é o dado mais valioso da fase de canário.
+    // Não guarda telefone: a referência é o código da reserva (mesma decisão de
+    // minimização de PII tomada em aria_phone_quality).
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS public.aria_outbound_log (
+        id                 BIGSERIAL PRIMARY KEY,
+        canal              TEXT NOT NULL DEFAULT 'whatsapp',
+        origem             TEXT NOT NULL,
+        evento             TEXT,
+        reservation_code   TEXT,
+        desfecho           TEXT NOT NULL,
+        motivo             TEXT,
+        qualidade_telefone TEXT,
+        pais               TEXT,
+        locale             TEXT,
+        template           TEXT,
+        trace_id           TEXT,
+        created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS aria_outbound_log_created_idx
+        ON public.aria_outbound_log (created_at DESC);
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS aria_outbound_log_desfecho_idx
+        ON public.aria_outbound_log (desfecho, created_at DESC);
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS aria_outbound_log_reserva_idx
+        ON public.aria_outbound_log (reservation_code);
+    `);
+
+    // ── Fila de replay do WHATSAPP ────────────────────────────────────────────
+    // O e-mail tinha fila (aria_pending_emails); o WhatsApp não. Em 19/09/2026 uma
+    // mensagem de cliente chegou com o modelo fora do ar (conta sem crédito) e foi
+    // perdida para sempre: a Meta já tinha recebido o 200, a fila em memória
+    // descartou, ninguém soube. Agora um turno que falha no modelo grava aqui e é
+    // reprocessado a cada 10 min pelo mesmo caminho da conversa.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS public.aria_pending_whatsapp (
+        id         BIGSERIAL PRIMARY KEY,
+        chat_id    TEXT NOT NULL,
+        push_name  TEXT,
+        blocks     JSONB NOT NULL,
+        tentativas INT NOT NULL DEFAULT 0,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS aria_pending_whatsapp_chat_idx
+        ON public.aria_pending_whatsapp (chat_id, created_at);
+    `);
+
+    // Notas do Juiz de Conversa (juiz.ts): uma linha por resposta enviada, seis critérios
+    // do ADR-015 em `notas` (0/1) e a soma em `nota`. Nunca guarda o texto da conversa.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS public.aria_quality_scores (
+        id         BIGSERIAL PRIMARY KEY,
+        judged_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        message_id BIGINT NOT NULL UNIQUE,
+        chat_id    TEXT,
+        channel    TEXT,
+        model      TEXT,
+        notas      JSONB NOT NULL,
+        nota       INTEGER NOT NULL,
+        motivo     TEXT
+      );
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS aria_quality_scores_at_idx
+        ON public.aria_quality_scores (judged_at DESC);
+    `);
+
+    // Semeia o histórico do ledger (idempotente; ON CONFLICT DO NOTHING).
+    try {
+      const { seedCampaignSends } = await import("./campaign.js");
+      await seedCampaignSends(client);
+    } catch (e) {
+      console.warn("[dashboard] seed da campanha falhou (segue sem semear):", e);
     }
 
     console.log("[dashboard] migrations ok");

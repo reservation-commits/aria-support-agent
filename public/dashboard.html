@@ -267,6 +267,7 @@
     <button class="nav" data-go="ferramentas"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a4.5 4.5 0 0 0-6 6L3 18l3 3 5.7-5.7a4.5 4.5 0 0 0 6-6L14 13l-3-3z"/></svg><span>Ferramentas</span><span class="key">7</span></button>
     <button class="nav" data-go="sugestoes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 1 4 10.5c-.8.7-1 1.5-1 2.5h-6c0-1-.2-1.8-1-2.5A6 6 0 0 1 12 3z"/></svg><span>Sugestões</span><span class="badge gold" id="bdg-sug"></span><span class="key">8</span></button>
     <button class="nav" data-go="catalogo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V4H6.5A2.5 2.5 0 0 0 4 6.5v13zM4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5"/></svg><span>Catálogo</span></button>
+    <button class="nav" data-go="campanha"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4z"/></svg><span>Campanha</span></button>
     <div class="navlbl">Plataforma</div>
     <button class="nav" data-go="lembretes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 8-3 8h18s-3-1-3-8M10.3 21a2 2 0 0 0 3.4 0"/></svg><span>Lembretes</span><span class="key">9</span></button>
     <button class="nav" data-go="escopo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/></svg><span>Fora de escopo</span><span class="badge" id="bdg-scope"></span></button>
@@ -427,6 +428,19 @@
       </section>
 
       <!-- ═══ CATÁLOGO ═══ -->
+      <section data-view="campanha">
+        <div class="grid kpis">
+          <div class="card kpi"><div class="l">Convites enviados</div><div class="v" id="cp-sends">—</div><div class="s"><span id="cp-rest">—</span> restaurantes</div></div>
+          <div class="card kpi"><div class="l">Cliques</div><div class="v" id="cp-clicks">—</div><div class="s"><span id="cp-clickers">—</span> casas clicaram</div></div>
+          <div class="card kpi"><div class="l">Ativações</div><div class="v" id="cp-activated">—</div><div class="s">contas profissionais criadas</div></div>
+          <div class="card kpi"><div class="l">Bounces</div><div class="v" id="cp-bounces">—</div><div class="s">e-mails devolvidos</div></div>
+          <div class="card kpi"><div class="l">Último clique</div><div class="v" id="cp-lastclick" style="font-size:18px">—</div><div class="s">hora local</div></div>
+        </div>
+        <div class="card"><div class="cardhead"><h3>Restaurantes da campanha</h3><span class="hint" id="cp-hint">ordenados por ativação e cliques · aberturas não são rastreáveis (e-mails sem imagens — clique é a métrica de engajamento)</span></div><div id="cp-table"></div></div>
+        <div class="card"><div class="cardhead"><h3>Cliques recentes</h3><span class="hint">webhook /go do n8n · persistidos no banco</span></div><div id="cp-recent"></div></div>
+        <div class="card"><div class="cardhead"><h3>Ondas</h3><span class="hint">fonte: ledger oficial da campanha</span></div><div id="cp-waves"></div></div>
+      </section>
+
       <section data-view="catalogo">
         <div class="grid kpis">
           <div class="card kpi"><div class="l">Publicados</div><div class="v" id="ct-total">—</div><div class="s">restaurantes no catálogo</div></div>
@@ -750,7 +764,7 @@ function renderHeatmap(el, cells){
 /* ═══════════════════ estado & router ═══════════════════ */
 const TITLES = { visao:'Visão geral', conversas:'Conversas', escalacoes:'Escalações', reservas:'Reservas',
   avaliacoes:'Avaliações', custo:'Custo & tokens', ferramentas:'Ferramentas', catalogo:'Catálogo', sugestoes:'Sugestões',
-  lembretes:'Lembretes', escopo:'Fora de escopo', sistema:'Saúde & sistema' };
+  campanha:'Campanha de fundadores', lembretes:'Lembretes', escopo:'Fora de escopo', sistema:'Saúde & sistema' };
 const state = { view:'visao', convs:[], convSel:null, convChan:'', convStatus:'', canned:null, handoffs:[], usageDays:7, resStatus:'', resStatuses:null, feed:[], overview:null };
 
 /* ── operador autenticado ── */
@@ -780,6 +794,41 @@ document.addEventListener('click', e => {
 
 /* ═══════════════════ loaders por seção ═══════════════════ */
 const LOAD = {};
+
+/* ── Campanha de fundadores ── */
+LOAD.campanha = async function(){
+  const d = await api('/campaign');
+  if (!d) { $('#cp-table').innerHTML = '<div class="hint" style="padding:14px">Falha ao carregar a campanha.</div>'; return; }
+  const k = d.kpis || {};
+  $('#cp-sends').textContent = fmtInt(k.sends);
+  $('#cp-rest').textContent = fmtInt(k.restaurants);
+  $('#cp-clicks').textContent = fmtInt(k.clicks);
+  $('#cp-clickers').textContent = fmtInt(k.clickers);
+  $('#cp-activated').textContent = fmtInt(k.activated);
+  $('#cp-bounces').textContent = fmtInt(k.bounces);
+  $('#cp-lastclick').textContent = k.last_click ? new Date(k.last_click).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—';
+  if (d.clicks_sync && !d.clicks_sync.configured)
+    $('#cp-hint').textContent = 'cliques NÃO configurados: defina N8N_API_URL e N8N_API_KEY no ambiente do serviço';
+  const rows = d.restaurants || [];
+  $('#cp-table').innerHTML = rows.length ? '<table><thead><tr><th>Restaurante</th><th>Convites</th><th>Ondas</th><th>Último envio</th><th>Cliques</th><th>Último clique</th><th>Status</th></tr></thead><tbody>' +
+    rows.map(r => {
+      const st = r.activated ? '<span class="chip gold">ATIVADO</span>'
+        : r.bounced ? '<span class="chip" style="color:var(--bad)">bounce</span>'
+        : Number(r.clicks) > 0 ? '<span class="chip">clicou</span>'
+        : '<span class="chip" style="opacity:.55">enviado</span>';
+      return `<tr><td><b>${esc(r.name || r.restaurant_id)}</b><div class="hint">${esc(r.recipient || '')}</div></td>` +
+        `<td class="tnum">${fmtInt(r.sends)}</td><td>${esc(r.waves || '')}</td><td>${fmtDateBR(r.last_sent)}</td>` +
+        `<td class="tnum">${fmtInt(r.clicks)}</td><td>${r.last_click ? new Date(r.last_click).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—'}</td><td>${st}</td></tr>`;
+    }).join('') + '</tbody></table>' : '<div class="hint" style="padding:14px">Sem envios registrados.</div>';
+  const rec = d.recent_clicks || [];
+  $('#cp-recent').innerHTML = rec.length ? '<table><thead><tr><th>Quando</th><th>Restaurante</th><th>Campanha</th></tr></thead><tbody>' +
+    rec.map(c => `<tr><td>${new Date(c.clicked_at).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</td><td><b>${esc(c.name || c.restaurant_id)}</b></td><td>${esc(c.campaign)}</td></tr>`).join('') +
+    '</tbody></table>' : '<div class="hint" style="padding:14px">Nenhum clique registrado ainda.</div>';
+  const wv = d.by_wave || [];
+  $('#cp-waves').innerHTML = wv.length ? '<table><thead><tr><th>Onda</th><th>Envios</th><th>Período</th><th>Bounces</th></tr></thead><tbody>' +
+    wv.map(w => `<tr><td><b>${esc(w.wave)}</b></td><td class="tnum">${fmtInt(w.sends)}</td><td>${fmtDateBR(w.first_sent)} – ${fmtDateBR(w.last_sent)}</td><td class="tnum">${fmtInt(w.bounces)}</td></tr>`).join('') +
+    '</tbody></table>' : '';
+};
 
 /* ── Visão geral ── */
 LOAD.visao = async function(){

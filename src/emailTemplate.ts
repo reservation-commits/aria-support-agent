@@ -1,34 +1,42 @@
 /**
- * emailTemplate.ts — template HTML de email da Aria, na identidade visual
- * REAL de theworldkeys.com (tokens extraídos do site em 2026-07-12):
+ * emailTemplate.ts — carta da Aria no PADRÃO TWK DE NOTIFICAÇÕES (2026-09-11).
  *
- *   ink #070b10 · charcoal #0f1218 · warm #181c24 · cream #ede9df ·
- *   off-white #f7f4ef · gold #c9a96e / light #e4c990 / dark #9e7c48 ·
- *   silver #9a97a8 · Cormorant Garamond (display) + Jost (texto) · cantos retos
+ *   fundo #0B0A08 · cartão #12100C com borda #26200F e cantos 16px ·
+ *   dourado #CE9E3C / claro #E6C87A · texto forte #F5EFE3 · corpo #B5AB93 ·
+ *   títulos em Georgia · chave animada + wordmark + PARIS · rodapé institucional
  *
- * Decisões de EMAIL (≠ web): layout em tabelas com estilos inline (Outlook),
- * largura 600px, base CLARA (cream/ink/ouro) — fundo escuro sofre inversões
- * erráticas de dark-mode no Gmail/Outlook — com faixa de cabeçalho ink e
- * wordmark serifado dourado. Fontes com fallback de sistema: Cormorant →
- * Georgia; Jost → Segoe UI/Helvetica (webfonts não carregam na maioria dos
- * clientes). Módulo PURO e testável.
+ * Por que mudou: até 11/09 a carta da Aria era clara (cream/ink), por receio de
+ * inversão de dark-mode no Gmail/Outlook. Os e-mails transacionais escuros já
+ * circulam há semanas sem esse problema, e o cliente passou a receber duas
+ * identidades diferentes da mesma marca. O fundador pediu uma só: a das
+ * notificações. `color-scheme: dark` declarado evita a inversão automática.
+ *
+ * Decisões de EMAIL (≠ web): tabelas com estilo inline (Outlook), 600px, fontes
+ * de sistema (Georgia/Arial — webfont não carrega na maioria dos clientes),
+ * imagens só logo e wordmark. Módulo PURO e testável.
  */
 
+// Paleta do padrão TWK de notificações (2026-09-11): cartão escuro, dourado,
+// títulos em Georgia. É a mesma dos e-mails transacionais que o cliente já recebe.
 const C = {
-  ink: "#070b10",
-  paper: "#ede9df",     // fundo externo (cream do site)
-  card: "#f7f4ef",      // cartão (twk-white)
-  text: "#1d222b",      // ink suavizado para leitura longa
-  muted: "#6e6a5e",
-  hairline: "#ddd6c6",
-  gold: "#c9a96e",
-  goldLight: "#e4c990",
-  goldDark: "#9e7c48",
-  silver: "#9a97a8",
+  ink: "#0B0A08",       // fundo externo
+  paper: "#0B0A08",
+  card: "#12100C",      // cartão
+  cardInner: "#1A1611",  // cartão de detalhes dentro do cartão
+  text: "#F5EFE3",      // texto forte (títulos, valores)
+  body: "#B5AB93",      // corpo de leitura
+  muted: "#8F8368",
+  hairline: "#26200F",
+  gold: "#CE9E3C",
+  goldLight: "#E6C87A",
+  goldDark: "#8C6A28",
+  silver: "#6E6551",
 };
 
-const SERIF = `'Cormorant Garamond', Georgia, 'Times New Roman', serif`;
-const SANS = `'Jost', 'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif`;
+const SERIF = `Georgia, 'Times New Roman', serif`;
+const SANS = `Arial, Helvetica, sans-serif`;
+const LOGO = "https://theworldkeys.com/images/twk-logo.gif";
+const WORDMARK = "https://img.mailinblue.com/6331555/images/content_library/original/661430b29475332809dc25ad.png";
 
 export type EmailLang = "pt" | "en" | "es" | "fr" | "it";
 
@@ -134,7 +142,7 @@ function contactRow(chrome: ChromeStr, iconBaseUrl: string): string {
       (c) =>
         `<td style="padding:0 13px;"><a href="${c.href}" target="_blank" style="text-decoration:none;">` +
         `<img src="${iconBaseUrl}/icons/${c.key}.png" width="26" height="26" alt="${label(c)}" ` +
-        `style="display:block;border:0;opacity:0.75;" /></a></td>`,
+        `style="display:block;border:0;opacity:0.9;" /></a></td>`,
     ).join("");
     return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center"><tr>${cells}</tr></table>`;
   }
@@ -142,7 +150,7 @@ function contactRow(chrome: ChromeStr, iconBaseUrl: string): string {
   const cells = CONTACTS.map(
     (c) =>
       `<td style="padding:0 11px;text-align:center;font-family:${SANS};font-size:11px;color:${C.muted};">` +
-      `<a href="${c.href}" target="_blank" style="text-decoration:none;color:${C.goldDark};">` +
+      `<a href="${c.href}" target="_blank" style="text-decoration:none;color:${C.goldLight};">` +
       `<span style="font-size:18px;">${c.emoji}</span><br/>${label(c)}</a></td>`,
   ).join("");
   return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center"><tr>${cells}</tr></table>`;
@@ -168,7 +176,7 @@ function autolink(escaped: string): string {
     /\bhttps?:\/\/[^\s<]+[^\s<.,;:!?)"']|(?<![@\w.])(?:www\.)?theworldkeys\.com(?:\/[^\s<]*[^\s<.,;:!?)"'])?/g,
     (url) => {
       const href = url.startsWith("http") ? url : `https://${url}`;
-      return `<a href="${href}" style="color:${C.goldDark};font-weight:500;text-decoration:underline;text-decoration-color:${C.gold};" target="_blank">${url}</a>`;
+      return `<a href="${href}" style="color:${C.goldLight};font-weight:600;text-decoration:underline;text-decoration-color:${C.goldDark};" target="_blank">${url}</a>`;
     },
   );
 }
@@ -182,7 +190,7 @@ function paragraphs(bodyText: string): string {
     .map((p) => autolink(escHtml(p)).replace(/\n/g, "<br/>"))
     .map(
       (p) =>
-        `<p style="margin:0 0 18px;font-family:${SANS};font-size:15.5px;line-height:1.75;color:${C.text};">${p}</p>`,
+        `<p style="margin:0 0 16px;font-family:${SANS};font-size:15px;line-height:1.65;color:${C.body};">${p}</p>`,
     )
     .join("\n");
 }
@@ -195,6 +203,7 @@ export function renderEmailHtml(
   bodyText: string,
   langOverride?: EmailLang,
   iconBaseUrl = "",
+  titulo = "",
 ): string {
   const content = paragraphs(bodyText);
   const preheader = escHtml(bodyText.trim().split("\n")[0] ?? "").slice(0, 140);
@@ -204,58 +213,81 @@ export function renderEmailHtml(
     .replace("{b}", `<strong style="color:${C.text};font-weight:600;">`)
     .replace("{/b}", "</strong>");
   const contacts = contactRow(chrome, iconBaseUrl.replace(/\/+$/, ""));
+  // A Aria assina no próprio corpo ("Com prazer, Aria"). Repetir o nome no bloco
+  // de assinatura deixava "Aria" duas vezes seguidas — aqui ele só aparece quando
+  // a carta não termina assinada.
+  const jaAssinou = /^\s*aria\b/i.test((bodyText.trim().split("\n").filter((l) => l.trim()).pop() ?? ""));
+  const assinaturaNome = jaAssinou
+    ? ""
+    : `          <div style="font-family:${SERIF};font-size:19px;font-style:italic;color:${C.goldLight};">Aria</div>\n`;
+  const tituloHtml = titulo
+    ? `    <tr><td align="center" style="padding:26px 24px 10px;">
+      <h1 style="margin:0;font-family:${SERIF};font-weight:normal;font-size:24px;line-height:1.35;color:${C.text};">${escHtml(titulo)}</h1>
+    </td></tr>`
+    : "";
 
   return `<!doctype html>
-<html lang="pt" xmlns="http://www.w3.org/1999/xhtml">
+<html lang="${lang}" xmlns="http://www.w3.org/1999/xhtml">
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<meta name="color-scheme" content="light"/>
-<meta name="supported-color-schemes" content="light"/>
+<meta name="color-scheme" content="dark"/>
+<meta name="supported-color-schemes" content="dark"/>
 <title>The World Keys</title>
 </head>
 <body style="margin:0;padding:0;background-color:${C.paper};">
 <!-- preheader (oculto): primeira linha da mensagem no preview da caixa -->
 <div style="display:none;max-height:0;overflow:hidden;mso-hide:all;">${preheader}&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;</div>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${C.paper}" style="background-color:${C.paper};">
-<tr><td align="center" style="padding:28px 14px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${C.paper}" style="background-color:${C.paper};border-collapse:collapse;">
+<tr><td align="center" style="padding:12px 6px;">
 
-  <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px;max-width:100%;">
+  <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" bgcolor="${C.card}" style="width:600px;max-width:100%;background-color:${C.card};border:1px solid ${C.hairline};border-radius:16px;border-collapse:separate;overflow:hidden;">
 
-    <!-- ═══ Cabeçalho: faixa ink com wordmark dourado ═══ -->
-    <tr><td bgcolor="${C.ink}" style="background-color:${C.ink};padding:30px 40px 26px;text-align:center;">
-      <div style="font-family:${SERIF};font-size:27px;font-weight:400;letter-spacing:6px;color:${C.gold};">THE&nbsp;WORLD&nbsp;KEYS</div>
-      <div style="font-family:${SANS};font-size:10.5px;font-weight:400;letter-spacing:4px;color:${C.silver};padding-top:9px;">${chrome.tagline}</div>
+    <!-- Cabeçalho: chave + wordmark + PARIS, igual aos transacionais -->
+    <tr><td align="center" style="padding:36px 20px 0 20px;">
+      <a href="https://theworldkeys.com/" target="_blank" style="text-decoration:none;">
+        <img src="${LOGO}" width="56" alt="" style="display:block;margin:0 auto 14px auto;width:56px;height:auto;border:0;" border="0" />
+        <img src="${WORDMARK}" width="220" alt="THE WORLD KEYS" style="display:block;margin:0 auto;width:220px;height:auto;border:0;" border="0" />
+      </a>
+      <div style="font-family:${SANS};font-size:10px;letter-spacing:4px;color:${C.muted};padding-top:10px;">${chrome.tagline}</div>
     </td></tr>
 
-    <!-- fio dourado -->
-    <tr><td style="height:2px;line-height:2px;font-size:2px;background:linear-gradient(90deg,${C.goldDark},${C.goldLight},${C.goldDark});background-color:${C.gold};">&nbsp;</td></tr>
+    <!-- fio dourado curto -->
+    <tr><td align="center" style="padding:20px 20px 0 20px;">
+      <table role="presentation" width="48" cellpadding="0" cellspacing="0" border="0"><tr><td style="border-top:1px solid ${C.gold};font-size:0;line-height:0;">&nbsp;</td></tr></table>
+    </td></tr>
 
-    <!-- ═══ Corpo ═══ -->
-    <tr><td bgcolor="${C.card}" style="background-color:${C.card};padding:38px 44px 22px;">
+${tituloHtml}
+    <!-- Corpo: a carta da Aria -->
+    <tr><td style="padding:${titulo ? "8px" : "26px"} 28px 0 28px;">
 ${content}
     </td></tr>
 
-    <!-- assinatura visual -->
-    <tr><td bgcolor="${C.card}" style="background-color:${C.card};padding:0 44px 36px;">
+    <!-- Assinatura -->
+    <tr><td style="padding:6px 28px 0 28px;">
       <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
-        <tr><td style="border-top:1px solid ${C.hairline};padding-top:20px;">
-          <div style="font-family:${SERIF};font-size:19px;font-style:italic;color:${C.goldDark};">Aria</div>
-          <div style="font-family:${SANS};font-size:11px;letter-spacing:2.5px;color:${C.muted};padding-top:4px;">THE&nbsp;WORLD&nbsp;KEYS</div>
+        <tr><td style="border-top:1px solid ${C.hairline};padding-top:18px;">
+${assinaturaNome}          <div style="font-family:${SANS};font-size:11px;letter-spacing:2.5px;color:${C.muted};">THE&nbsp;WORLD&nbsp;KEYS&nbsp;&nbsp;&#183;&nbsp;&nbsp;CONCIERGE</div>
         </td></tr>
       </table>
     </td></tr>
 
-    <!-- ═══ Rodapé: ícones de contato (marca d'água) + nota + fine print ═══ -->
-    <tr><td align="center" style="padding:20px 30px 6px;">
+    <!-- Contatos + convite a responder -->
+    <tr><td align="center" style="padding:22px 30px 0;">
       ${contacts}
     </td></tr>
-    <tr><td style="padding:14px 30px 8px;text-align:center;">
-      <p style="margin:0 0 12px;font-family:${SANS};font-size:12px;line-height:1.7;color:${C.muted};">
-        ${replyLine}
-      </p>
-      <p style="margin:0;font-family:${SANS};font-size:10.5px;letter-spacing:1.5px;color:${C.silver};">
-        THE&nbsp;WORLD&nbsp;KEYS&nbsp;&middot;&nbsp;PARIS&nbsp;&middot;&nbsp;${new Date().getFullYear()}
+    <tr><td align="center" style="padding:14px 28px 0;">
+      <p style="margin:0;font-family:${SANS};font-size:12.5px;line-height:1.7;color:${C.muted};">${replyLine}</p>
+    </td></tr>
+
+    <!-- Rodapé institucional, idêntico ao dos transacionais -->
+    <tr><td align="center" style="padding:22px 20px 0 20px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="border-top:1px solid ${C.hairline};font-size:0;line-height:0;">&nbsp;</td></tr></table></td></tr>
+    <tr><td align="center" style="padding:16px 24px 28px 24px;">
+      <p style="margin:0 0 4px 0;font-family:${SERIF};font-size:13px;letter-spacing:3px;color:${C.muted};">THE WORLD KEYS</p>
+      <p style="margin:0;font-family:${SANS};font-size:11px;line-height:1.8;color:${C.silver};">
+        <a href="https://theworldkeys.com/terms-of-use/" style="color:${C.muted};text-decoration:none;">Terms &amp; Conditions</a> &nbsp;&#183;&nbsp; <a href="mailto:support@theworldkeys.com" style="color:${C.muted};text-decoration:none;">support@theworldkeys.com</a><br/>
+        66, Av. des Champs-&#201;lys&#233;es, 75008 Paris, France<br/>
+        VAT: FR24901268326 &#183; R.C.S Paris: 901 268 326 &#183; &#169; ${new Date().getFullYear()} The World Keys
       </p>
     </td></tr>
 

@@ -44,6 +44,12 @@ import { takeOver, release, listHandoffs } from "../handoff.js";
 import { sendText } from "../whatsapp.js";
 import { sendOperatorEmail } from "../emailChannel.js";
 import { costStatus } from "../costGuard.js";
+import {
+  syncClicksFromN8n,
+  getCampaignOverview,
+  importCampaignSends,
+  type CampaignSendInput,
+} from "./campaign.js";
 import { logMessage } from "./logger.js";
 import { config } from "../config.js";
 
@@ -208,6 +214,34 @@ export function createDashboardRouter(): express.Router {
       const result = await runAnalysis();
       res.json(result);
     } catch (err) { res.status(500).json({ error: errorMessage(err) }); }
+  });
+
+  // ─── Campanha de fundadores ───────────────────────────────────────────────
+  // Visão consolidada: envios (ledger), cliques (n8n, persistidos) e
+  // ativações (restaurant_users). Sincroniza cliques sob demanda (throttle).
+  router.get("/api/campaign", auth, async (req, res) => {
+    try {
+      const sync = await syncClicksFromN8n(req.query.force === "1").catch((e) => {
+        console.error("[campaign] sync n8n falhou:", errorMessage(e));
+        return { synced: 0, configured: true, error: true } as const;
+      });
+      const overview = await getCampaignOverview();
+      res.json({ ...(overview as object), clicks_sync: sync });
+    } catch (err) {
+      res.status(500).json({ error: errorMessage(err) });
+    }
+  });
+
+  // Import incremental de novos lotes (upsert por gmail_id) — sem redeploy.
+  router.post("/api/campaign/import", auth, async (req, res) => {
+    try {
+      const rows = Array.isArray(req.body?.rows) ? (req.body.rows as CampaignSendInput[]) : [];
+      if (!rows.length) return res.status(400).json({ error: "corpo esperado: { rows: [...] }" });
+      const imported = await importCampaignSends(rows);
+      res.json({ imported });
+    } catch (err) {
+      res.status(500).json({ error: errorMessage(err) });
+    }
   });
 
   // ─── Handoff humano ───────────────────────────────────────────────────────

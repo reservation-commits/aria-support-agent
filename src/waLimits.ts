@@ -14,6 +14,8 @@ export const WA_LIST_ROW_TITLE_MAX = 24;
 export const WA_LIST_ROW_DESC_MAX = 72;
 export const WA_LIST_BUTTON_MAX = 20;
 export const WA_SECTION_TITLE_MAX = 24;
+/** Teto por parâmetro de template — o corpo inteiro cabe em 1024. */
+export const WA_TEMPLATE_PARAM_MAX = 250;
 
 /**
  * Divide texto acima do limite em partes enviáveis, cortando de preferência
@@ -33,6 +35,24 @@ export function splitForWhatsApp(text: string): string[] {
   }
   if (rest) parts.push(rest);
   return parts;
+}
+
+/**
+ * Saneia um parâmetro de template ({{1}}, {{2}}…).
+ *
+ * A Cloud API REJEITA o envio inteiro quando um parâmetro contém quebra de
+ * linha, tabulação ou mais de 4 espaços seguidos. Como os parâmetros vêm do
+ * banco (nome do cliente, nome do restaurante), basta um cadastro com "\n" no
+ * fim para derrubar a notificação — e o erro chega como um 400 genérico, difícil
+ * de rastrear às 3h da manhã. Sanear aqui, e não em cada chamador, garante que
+ * nenhum caminho de envio escape.
+ */
+export function sanitizeTemplateParam(s: string, max = WA_TEMPLATE_PARAM_MAX): string {
+  const limpo = String(s ?? "")
+    .replace(/[\r\n\t]+/g, " ") // proibidos pela Meta
+    .replace(/ {2,}/g, " ")     // corta a regra dos 4 espaços na raiz
+    .trim();
+  return clampText(limpo, max);
 }
 
 /** Corta texto no limite com reticências — nunca envia payload inválido. */
