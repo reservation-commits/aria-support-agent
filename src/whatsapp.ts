@@ -229,6 +229,8 @@ export async function sendTemplate(params: {
   template: string;
   locale: string;
   bodyParams: string[];
+  /** Sufixo dinâmico do botão de URL do template (ex.: código da reserva em /r/{{1}}). */
+  buttonUrlParam?: string;
 }): Promise<boolean> {
   // Usa o MESMO postWithRetry do texto livre: uma falha transitória da Cloud
   // API (5xx, rede, 429) não pode queimar uma notificação de reserva.
@@ -253,6 +255,9 @@ export async function sendTemplate(params: {
                   text: sanitizeTemplateParam(t),
                 })),
               },
+              ...(params.buttonUrlParam
+                ? [{ type: "button", sub_type: "url", index: "0", parameters: [{ type: "text", text: sanitizeTemplateParam(params.buttonUrlParam) }] }]
+                : []),
             ]
           : [],
       },

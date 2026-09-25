@@ -894,6 +894,7 @@ export async function isOptedOut(phone: string): Promise<boolean> {
 
 export type ReminderRow = {
   reservation_code: string;
+  restaurant_id?: string | null;
   restaurant_name: string | null;
   city: string | null;
   booking_date: string | Date;
@@ -952,7 +953,7 @@ export async function getReservationsForReminder(
   statuses: string[] = ["confirmed"],
 ): Promise<ReminderRow[]> {
   const { rows } = await pool.query(
-    `SELECT r.reservation_code, d.name AS restaurant_name, d.city,
+    `SELECT r.reservation_code, r.restaurant_id, d.name AS restaurant_name, d.city,
             r.booking_date, r.reservation_time, r.people,
             u.phone AS customer_phone, u.name AS customer_name,
             (z.name IS NOT NULL) AS tz_valido,
@@ -1005,7 +1006,7 @@ export async function getReservationForEvent(
   reservationCode: string,
 ): Promise<EventReservationRow | null> {
   const { rows } = await pool.query(
-    `SELECT r.reservation_code, d.name AS restaurant_name, d.city,
+    `SELECT r.reservation_code, r.restaurant_id, d.name AS restaurant_name, d.city,
             r.booking_date, r.reservation_time, r.people, r.booking_status,
             r.reschedule_proposed_date, r.reschedule_proposed_time,
             u.phone AS customer_phone, u.name AS customer_name,
@@ -1119,7 +1120,7 @@ export async function getStalePendingReservations(
   status: string,
 ): Promise<ReminderRow[]> {
   const { rows } = await pool.query(
-    `SELECT r.reservation_code, d.name AS restaurant_name, d.city,
+    `SELECT r.reservation_code, r.restaurant_id, d.name AS restaurant_name, d.city,
             r.booking_date, r.reservation_time, r.people,
             u.phone AS customer_phone, u.name AS customer_name
        FROM public.reservations r

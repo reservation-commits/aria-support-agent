@@ -156,6 +156,19 @@ export const config = {
       reagendamento_proposto: process.env.RESERVATION_EVENT_TEMPLATE_REAGENDAMENTO ?? "",
       cancelado: process.env.RESERVATION_EVENT_TEMPLATE_CANCELADO ?? "",
     } as Record<string, string>,
+    // Etapas do ESTABELECIMENTO (2026-09-25): só para casas marcadas no opt-in
+    // (tipo = estabelecimento). Vazio = etapa da casa desligada, sem finding.
+    venueTemplates: {
+      pedido_recebido: process.env.RESERVATION_EVENT_TEMPLATE_VENUE_RECEBIDO ?? "",
+      cancelado: process.env.RESERVATION_EVENT_TEMPLATE_VENUE_CANCELADO ?? "",
+    } as Record<string, string>,
+  },
+
+  venueBriefing: {
+    // Véspera para a CASA: nome, hora e pessoas, ~24h antes. Só casas marcadas.
+    enabled: (process.env.VENUE_BRIEFING_ENABLED ?? "false").toLowerCase() === "true",
+    template: process.env.VENUE_BRIEFING_TEMPLATE ?? "",
+    hoursBefore: Number(process.env.VENUE_BRIEFING_HOURS_BEFORE ?? 24),
   },
 
   email: {

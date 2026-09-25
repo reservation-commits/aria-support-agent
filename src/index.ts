@@ -13,7 +13,7 @@ import {
 } from "./webhook.js";
 import { getOrRestoreHistory, setHistory, getAllActiveSessions } from "./sessions.js";
 import {
-  markMessageProcessed, pruneProcessedMessages, detectUnaccent, setOutboundConsent, setWhatsAppReservas, pool,
+  markMessageProcessed, pruneProcessedMessages, detectUnaccent, setOutboundConsent, setWhatsAppReservas, getReservationForEvent, pool,
   savePendingWhatsApp, loadPendingWhatsApp, claimPendingWhatsApp, requeuePendingWhatsApp,
 } from "./db.js";
 import { detectConsentIntent, consentConfirmation } from "./consent.js";
@@ -33,6 +33,8 @@ import { startReminders } from "./reminders.js";
 import { startEmailChannel, handleInboundEmail } from "./emailChannel.js";
 import { tratarEventoReserva } from "./reservationEvents.js";
 import { verificarSegredoWebhook, STATUS_DE } from "./webhookAuth.js";
+import { notificarEstabelecimento, startVenueReminders, type ResultadoEstabelecimento } from "./venueEvents.js";
+import { parsePayloadEvento } from "./eventFormat.js";
 import { avaliarTelefone, podeReceberWhatsApp } from "./phoneQuality.js";
 import { normalizarIdioma, IDIOMAS_ACEITOS } from "./templateLocale.js";
 import { createDashboardRouter } from "./dashboard/routes.js";
@@ -273,10 +275,20 @@ app.post("/webhook/reservation-event", (req, res) => {
   }
 
   void tratarEventoReserva(req.body)
-    .then((r) => {
+    .then(async (r) => {
+      // Etapa do ESTABELECIMENTO, independente do desfecho do cliente (2026-09-25).
+      let estabelecimento: ResultadoEstabelecimento = { acao: "nao_se_aplica", detalhe: "payload inválido" };
+      const p = parsePayloadEvento(req.body);
+      if (p) {
+        const linha = await getReservationForEvent(p.reservationCode).catch(() => null);
+        estabelecimento = await notificarEstabelecimento(p, linha).catch((err) => {
+          console.error("[evento-estabelecimento] erro não tratado", err);
+          return { acao: "falha_envio", detalhe: "falha interna" } as ResultadoEstabelecimento;
+        });
+      }
       // 200 mesmo quando nada foi enviado: "telefone não enviável" e "opt-out"
       // são desfechos corretos, não erros do chamador. O n8n não deve re-tentar.
-      res.status(r.acao === "payload_invalido" ? 400 : 200).json(r);
+      res.status(r.acao === "payload_invalido" ? 400 : 200).json({ ...r, estabelecimento });
     })
     .catch((err) => {
       console.error("[evento-reserva] erro não tratado", err);
@@ -646,6 +658,7 @@ app.listen(config.port, async () => {
       startAnalyst();
       startJuiz();
       startReminders();
+      startVenueReminders();
       startEmailChannel();
       startDedupCleanup();
       startEmbeddingsSync();
@@ -662,6 +675,7 @@ app.listen(config.port, async () => {
       startAnalyst();
       startJuiz();
       startReminders();
+      startVenueReminders();
       startEmailChannel();
       startDedupCleanup();
       startEmbeddingsSync();
