@@ -89,6 +89,17 @@ export function formatarHora(v: string | null | undefined, pais: string | null):
   }
 }
 
+/**
+ * Número de pessoas, como texto. Só aceita 1–20: fora disso devolve "" e o template
+ * não sai (dados_insuficientes → finding). A coluna `people` teve 112 valores
+ * estranhos até 03/2026 e nenhum nos 90 dias seguintes (medido 2026-09-25); numa
+ * mensagem ao cliente, número errado é pior que mensagem nenhuma.
+ */
+export function formatarPessoas(v: number | string | null | undefined): string {
+  const n = typeof v === "number" ? v : Number(String(v ?? "").trim());
+  return Number.isInteger(n) && n >= 1 && n <= 20 ? String(n) : "";
+}
+
 export function primeiroNome(full: string | null | undefined): string {
   if (!full) return "";
   return full.trim().split(/\s+/)[0] ?? "";
@@ -143,6 +154,7 @@ export type DadosEvento = {
   restaurant_name: string | null;
   booking_date: string | Date | null;
   reservation_time: string | null;
+  people?: number | string | null;
   reschedule_proposed_date?: string | Date | null;
   reschedule_proposed_time?: string | null;
 };
@@ -172,12 +184,14 @@ export function montarParametros(
   const casa = (d.restaurant_name ?? "").trim();
   const data = formatarData(d.booking_date, pais);
   const hora = formatarHora(d.reservation_time, pais);
+  const pessoas = formatarPessoas(d.people);
 
   let params: string[];
   switch (evento) {
     case "pedido_recebido":
     case "aceito":
-      params = [nome, casa, data, hora];
+      // {{5}} = número de pessoas (fundador, 2026-09-25: "não tô vendo").
+      params = [nome, casa, data, hora, pessoas];
       break;
     case "recusado":
     case "cancelado":

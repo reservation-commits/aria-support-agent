@@ -32,6 +32,7 @@ import { DETALHE_CONSENTIMENTO } from "./consentRegra.js";
 import { sendTemplate } from "./whatsapp.js";
 import { normalizePhone } from "./phone.js";
 import { escolherLocale } from "./templateLocale.js";
+import { formatarData, formatarHora, formatarPessoas } from "./eventFormat.js";
 import { publish } from "./dashboard/events.js";
 import { registrarSaida, type OrigemSaida, type RegistroSaida } from "./outboundLog.js";
 import { avaliarTelefone, podeReceberWhatsApp } from "./phoneQuality.js";
@@ -70,7 +71,7 @@ async function enviarLote(p: {
   template: string;
   /** Nome do evento no painel — preservado por varredura para não mudar o log. */
   evento: (locale: string) => string;
-  corpo: (r: ReminderRow) => string[];
+  corpo: (r: ReminderRow, pais: string | null) => string[];
 }): Promise<void> {
   let enviados = 0;
   let falhas = 0;
@@ -118,7 +119,13 @@ async function enviarLote(p: {
     }
 
     const locale = escolherLocale({ idiomaPreferido: consent.idioma, phone: to, aprovados: config.reminders.locales, defaultLocale: config.reminders.defaultLocale }).locale;
-    const ok = await sendTemplate({ to, template: p.template, locale, bodyParams: p.corpo(r) });
+    const bodyParams = p.corpo(r, tel.pais);
+    if (bodyParams.some((x) => x.length === 0)) {
+      // A Meta rejeita parâmetro vazio, e mensagem com dado faltando é pior que silêncio.
+      await anotar("dados_insuficientes", r, { locale, qualidadeTelefone: tel.qualidade, pais: tel.pais, motivo: "parâmetro vazio (nome, casa, data, hora ou pessoas)" });
+      continue;
+    }
+    const ok = await sendTemplate({ to, template: p.template, locale, bodyParams });
     if (!ok) {
       falhas++;
       await anotar("falha_envio", r, { locale, qualidadeTelefone: tel.qualidade, pais: tel.pais, motivo: "Cloud API recusou o envio" });
@@ -176,10 +183,10 @@ async function sweep(): Promise<void> {
     rows,
     template: config.reminders.template,
     evento: (locale) => `reminder_${KIND}_${locale}`,
-    corpo: (r) => [
+    corpo: (r, pais) => [
       firstName(r.customer_name),
       r.restaurant_name ?? "",
-      (r.reservation_time ?? "").slice(0, 5),
+      formatarHora(r.reservation_time, pais),
     ],
   });
 }
@@ -208,11 +215,14 @@ async function sweepBriefing(): Promise<void> {
     rows,
     template: config.briefing.template,
     evento: (locale) => `briefing_${locale}`,
-    corpo: (r) => [
+    // {{1}} nome · {{2}} restaurante · {{3}} data por extenso · {{4}} hora · {{5}} pessoas.
+    // Antes a data saía "03/10" — para um americano, 10 de março (corrigido 2026-09-25).
+    corpo: (r, pais) => [
       firstName(r.customer_name),
       r.restaurant_name ?? "",
-      String(r.booking_date ?? "").slice(0, 10).split("-").reverse().slice(0, 2).join("/"),
-      (r.reservation_time ?? "").slice(0, 5),
+      formatarData(r.booking_date, pais),
+      formatarHora(r.reservation_time, pais),
+      formatarPessoas(r.people),
     ],
   });
 }

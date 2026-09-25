@@ -4,6 +4,7 @@ import {
   ehEventoReserva,
   formatarData,
   formatarHora,
+  formatarPessoas,
   montarParametros,
   primeiroNome,
   toYMD,
@@ -63,10 +64,11 @@ test("a ordem dos parâmetros é o contrato com o template aprovado", () => {
     restaurant_name: "Le Bernardin",
     booking_date: "2026-04-03",
     reservation_time: "20:00:00",
+    people: 2,
   };
   const aceito = montarParametros("aceito", dados, "FR");
   assert.ok(aceito);
-  assert.equal(aceito.length, 4);
+  assert.equal(aceito.length, 5);
   assert.equal(aceito[0], "Marie");
   assert.equal(aceito[1], "Le Bernardin");
   assert.match(aceito[2], /avr/i);
@@ -141,4 +143,23 @@ test("parâmetro de template nunca leva o que a Meta rejeita", () => {
 test("parâmetro longo é cortado no teto", () => {
   const s = sanitizeTemplateParam("a".repeat(500));
   assert.ok(s.length <= WA_TEMPLATE_PARAM_MAX);
+});
+
+test("pessoas: {{5}} em recebido/aceito; fora de 1–20 bloqueia o envio", () => {
+  const base = { customer_name: "Anna Lee", restaurant_name: "Le Tobsil", booking_date: "2026-10-03", reservation_time: "20:00:00", people: 2 };
+  assert.equal(montarParametros("aceito", base, "US")?.[4], "2");
+  assert.equal(montarParametros("pedido_recebido", { ...base, people: "4" }, "FR")?.[4], "4");
+  assert.equal(montarParametros("aceito", { ...base, people: 0 }, "US"), null);
+  assert.equal(montarParametros("aceito", { ...base, people: 250 }, "US"), null);
+  assert.equal(montarParametros("aceito", { ...base, people: null }, "US"), null);
+  // recusado e cancelado não levam pessoas
+  assert.equal(montarParametros("recusado", { ...base, people: null }, "US")?.length, 3);
+});
+
+test("formatarPessoas aceita só inteiros de 1 a 20", () => {
+  assert.equal(formatarPessoas(2), "2");
+  assert.equal(formatarPessoas("6"), "6");
+  assert.equal(formatarPessoas(21), "");
+  assert.equal(formatarPessoas(2.5), "");
+  assert.equal(formatarPessoas(undefined), "");
 });
