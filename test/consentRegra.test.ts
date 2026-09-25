@@ -12,11 +12,16 @@ test("opt-in: linha existe mas não está marcada → não recebe", () => {
 });
 
 test("opt-in: marcada → recebe", () => {
-  assert.deepEqual(decidirEnvioWhatsApp({ whatsapp_reservas: true, outbound_opted_out: false }), { ok: true, motivo: "ok" });
+  assert.deepEqual(decidirEnvioWhatsApp({ whatsapp_reservas: true, outbound_opted_out: false }), { ok: true, motivo: "ok", idioma: null });
 });
 
 test("PARAR vence a marcação: marcada mas pediu para parar → não recebe", () => {
   assert.deepEqual(decidirEnvioWhatsApp({ whatsapp_reservas: true, outbound_opted_out: true }), { ok: false, motivo: "opt_out" });
+});
+
+test("opt-in: idioma marcado viaja na decisão", () => {
+  const d = decidirEnvioWhatsApp({ whatsapp_reservas: true, outbound_opted_out: false, idioma: "it" });
+  assert.equal(d.ok && d.idioma, "it");
 });
 
 test("estabelecimento segue a mesma regra", () => {

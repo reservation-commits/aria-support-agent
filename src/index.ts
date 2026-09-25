@@ -34,6 +34,7 @@ import { startEmailChannel, handleInboundEmail } from "./emailChannel.js";
 import { tratarEventoReserva } from "./reservationEvents.js";
 import { verificarSegredoWebhook, STATUS_DE } from "./webhookAuth.js";
 import { avaliarTelefone, podeReceberWhatsApp } from "./phoneQuality.js";
+import { normalizarIdioma, IDIOMAS_ACEITOS } from "./templateLocale.js";
 import { createDashboardRouter } from "./dashboard/routes.js";
 import { dashboardCredentials } from "./dashboard/auth.js";
 import { enqueueMessage, isBusy } from "./conversationQueue.js";
@@ -213,7 +214,7 @@ app.post("/webhook/email", (req, res) => {
  * Chamado pelo site (caixa "quero receber por WhatsApp") ou por um nó do n8n. Mesmo
  * segredo dos eventos; sem segredo configurado a rota não existe (404).
  * Corpo: { phone, whatsapp_reservas: true|false, tipo?: "cliente"|"estabelecimento",
- *          restaurant_id?, source?, motivo? }
+ *          restaurant_id?, source?, motivo?, idioma?: pt|en|es|fr|it|de }
  */
 app.post("/webhook/consent", (req, res) => {
   const veredito = verificarSegredoWebhook({
@@ -236,7 +237,16 @@ app.post("/webhook/consent", (req, res) => {
     return;
   }
   const tipo = b.tipo === "estabelecimento" ? "estabelecimento" : "cliente";
+  let idioma: string | null = null;
+  if (b.idioma != null && b.idioma !== "") {
+    idioma = normalizarIdioma(String(b.idioma));
+    if (!idioma) {
+      res.status(400).json({ ok: false, motivo: "idioma_desconhecido", detalhe: `use um de: ${IDIOMAS_ACEITOS.join(", ")}` });
+      return;
+    }
+  }
   setWhatsAppReservas({
+    idioma,
     phone: tel.e164,
     ligado: b.whatsapp_reservas,
     tipo,
@@ -244,7 +254,7 @@ app.post("/webhook/consent", (req, res) => {
     source: typeof b.source === "string" ? b.source.slice(0, 40) : "webhook",
     motivo: typeof b.motivo === "string" ? b.motivo.slice(0, 200) : null,
   })
-    .then(() => res.json({ ok: true, phone_pais: tel.pais, tipo, whatsapp_reservas: b.whatsapp_reservas }))
+    .then(() => res.json({ ok: true, phone_pais: tel.pais, tipo, whatsapp_reservas: b.whatsapp_reservas, idioma }))
     .catch((err) => {
       console.error("[consent] gravação falhou", err);
       res.status(500).json({ ok: false, motivo: "erro", detalhe: "falha interna" });

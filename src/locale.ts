@@ -1,12 +1,12 @@
 /**
  * locale.ts
  *
- * Mapa do código de discagem do país (E.164) → idioma base (pt/en/es/fr).
+ * Mapa do código de discagem do país (E.164) → idioma base (pt/en/es/fr/it/de).
  * Puro e sem dependências — usado para escolher o idioma de mensagens livres
  * (ex.: confirmação de opt-out) e como base para o idioma dos templates.
  */
 
-export type BaseLang = "pt" | "en" | "es" | "fr";
+export type BaseLang = "pt" | "en" | "es" | "fr" | "it" | "de";
 
 // Prefixos mais longos primeiro (ex: 351 antes de 1) — a ordenação é feita abaixo.
 const CODE_LANG: Array<[string, BaseLang]> = [
@@ -16,6 +16,8 @@ const CODE_LANG: Array<[string, BaseLang]> = [
   ["502", "es"], ["503", "es"], ["504", "es"], ["505", "es"], ["506", "es"], ["507", "es"],
   ["33", "fr"], ["32", "fr"], ["221", "fr"], ["225", "fr"],
   ["1", "en"], ["44", "en"], ["61", "en"], ["353", "en"], ["64", "en"], ["27", "en"],
+  ["39", "it"],
+  ["49", "de"], ["43", "de"],
 ];
 const SORTED = [...CODE_LANG].sort((a, b) => b[0].length - a[0].length);
 

@@ -45,7 +45,7 @@ import {
 import { DETALHE_CONSENTIMENTO } from "./consentRegra.js";
 import { publish } from "./dashboard/events.js";
 import { montarParametros, parsePayloadEvento } from "./eventFormat.js";
-import { languageForPhone } from "./locale.js";
+import { escolherLocale } from "./templateLocale.js";
 import { contarEnviosHoje, registrarSaida, type RegistroSaida } from "./outboundLog.js";
 import { avaliarTelefone, podeReceberWhatsApp } from "./phoneQuality.js";
 import { sendTemplate } from "./whatsapp.js";
@@ -65,28 +65,6 @@ export type AcaoEvento =
   | "falha_envio";
 
 export type ResultadoEvento = { acao: AcaoEvento; detalhe: string };
-
-const BASE_TO_TEMPLATE: Record<string, string> = { pt: "pt_BR", en: "en", es: "es", fr: "fr" };
-
-/**
- * Idioma do template. Só devolve um que esteja entre os APROVADOS na Meta
- * (config.reminders.locales) — tentar uma tradução inexistente é envio perdido.
- *
- * [Limitação declarada] O sinal é o país do telefone. O ADR-015 manda responder
- * no idioma do cliente, e para uma mensagem que inicia a conversa (sem texto
- * dele para ler) este é o melhor sinal disponível. Cliente italiano ou alemão
- * cai em inglês enquanto `locale.ts` não mapear IT/DE — degradação conhecida,
- * não silenciosa.
- */
-function localeParaTemplate(phone: string): string {
-  const aprovados = config.reminders.locales;
-  const permitido = (l: string) => aprovados.length === 0 || aprovados.includes(l);
-  const fallback = permitido(config.reminders.defaultLocale)
-    ? config.reminders.defaultLocale
-    : aprovados[0] ?? config.reminders.defaultLocale;
-  const doPais = BASE_TO_TEMPLATE[languageForPhone(phone)] ?? fallback;
-  return permitido(doPais) ? doPais : fallback;
-}
 
 async function registrarFinding(resumo: string, code: string): Promise<void> {
   console.error(`[evento-reserva] ${resumo}`);
@@ -219,7 +197,8 @@ async function decidir(body: unknown, ctx: Partial<RegistroSaida>): Promise<Resu
   }
 
   // 10 — envio.
-  const locale = localeParaTemplate(tel.e164);
+  // Idioma: preferência marcada no identificador → país do telefone → padrão (templateLocale.ts).
+  const locale = escolherLocale({ idiomaPreferido: consent.idioma, phone: tel.e164, aprovados: config.reminders.locales, defaultLocale: config.reminders.defaultLocale }).locale;
   ctx.locale = locale;
   const ok = await sendTemplate({ to: tel.e164, template, locale, bodyParams: params });
 

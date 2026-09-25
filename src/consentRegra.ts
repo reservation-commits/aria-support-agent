@@ -14,16 +14,17 @@ export interface LinhaConsentimento {
   whatsapp_reservas: boolean;
   outbound_opted_out: boolean;
   tipo?: string | null;
+  idioma?: string | null;
 }
 
 export type MotivoConsentimento = "sem_opt_in" | "opt_out";
-export type DecisaoConsentimento = { ok: true; motivo: "ok" } | { ok: false; motivo: MotivoConsentimento };
+export type DecisaoConsentimento = { ok: true; motivo: "ok"; idioma: string | null } | { ok: false; motivo: MotivoConsentimento };
 
 export function decidirEnvioWhatsApp(linha: LinhaConsentimento | null | undefined): DecisaoConsentimento {
   if (!linha) return { ok: false, motivo: "sem_opt_in" };
   if (linha.outbound_opted_out) return { ok: false, motivo: "opt_out" };
   if (!linha.whatsapp_reservas) return { ok: false, motivo: "sem_opt_in" };
-  return { ok: true, motivo: "ok" };
+  return { ok: true, motivo: "ok", idioma: linha.idioma ?? null };
 }
 
 export const DETALHE_CONSENTIMENTO: Record<MotivoConsentimento, string> = {

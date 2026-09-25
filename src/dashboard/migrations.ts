@@ -208,7 +208,8 @@ export async function runDashboardMigrations(): Promise<void> {
         ADD COLUMN IF NOT EXISTS whatsapp_reservas BOOLEAN NOT NULL DEFAULT false,
         ADD COLUMN IF NOT EXISTS tipo              TEXT    NOT NULL DEFAULT 'cliente',
         ADD COLUMN IF NOT EXISTS restaurant_id     TEXT,
-        ADD COLUMN IF NOT EXISTS motivo            TEXT;
+        ADD COLUMN IF NOT EXISTS motivo            TEXT,
+        ADD COLUMN IF NOT EXISTS idioma            TEXT;
     `);
     await client.query(`
       CREATE INDEX IF NOT EXISTS aria_contact_consent_optin_idx

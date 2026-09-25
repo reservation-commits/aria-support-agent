@@ -46,12 +46,16 @@ const MSG_OUT: Record<BaseLang, string> = {
   en: "Done. You will no longer receive reminders or review invitations. We remain at your service whenever you need — just message us. Aria · The World Keys",
   es: "Listo. Ya no recibirá recordatorios ni invitaciones de valoración. Seguimos a su disposición cuando lo necesite — solo escríbanos. Aria · The World Keys",
   fr: "C'est noté. Vous ne recevrez plus de rappels ni d'invitations à évaluer. Nous restons à votre disposition — écrivez-nous quand vous le souhaitez. Aria · The World Keys",
+  it: "Fatto. Non riceverà più promemoria né inviti a lasciare una recensione. Restiamo a sua disposizione — ci scriva quando vuole. Aria · The World Keys",
+  de: "Erledigt. Sie erhalten keine Erinnerungen und Bewertungseinladungen mehr. Wir sind weiterhin für Sie da — schreiben Sie uns jederzeit. Aria · The World Keys",
 };
 const MSG_IN: Record<BaseLang, string> = {
   pt: "Perfeito. Você voltará a receber nossos lembretes e convites. É um prazer tê-lo de volta. Aria · The World Keys",
   en: "Perfect. You will receive our reminders and invitations again. A pleasure to have you back. Aria · The World Keys",
   es: "Perfecto. Volverá a recibir nuestros recordatorios e invitaciones. Es un placer tenerle de vuelta. Aria · The World Keys",
   fr: "Parfait. Vous recevrez à nouveau nos rappels et invitations. Ravis de vous retrouver. Aria · The World Keys",
+  it: "Perfetto. Riceverà di nuovo i nostri promemoria e inviti. È un piacere riaverla con noi. Aria · The World Keys",
+  de: "Perfekt. Sie erhalten unsere Erinnerungen und Einladungen wieder. Schön, Sie wieder bei uns zu haben. Aria · The World Keys",
 };
 
 export function consentConfirmation(intent: "opt_out" | "opt_in", phone: string): string {

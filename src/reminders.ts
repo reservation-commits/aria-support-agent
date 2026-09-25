@@ -31,7 +31,7 @@ import {
 import { DETALHE_CONSENTIMENTO } from "./consentRegra.js";
 import { sendTemplate } from "./whatsapp.js";
 import { normalizePhone } from "./phone.js";
-import { languageForPhone } from "./locale.js";
+import { escolherLocale } from "./templateLocale.js";
 import { publish } from "./dashboard/events.js";
 import { registrarSaida, type OrigemSaida, type RegistroSaida } from "./outboundLog.js";
 import { avaliarTelefone, podeReceberWhatsApp } from "./phoneQuality.js";
@@ -41,21 +41,6 @@ const KIND_REVIEW = "6h_review";
 const KIND_BRIEFING = "briefing_24h";
 
 // Idioma base (pt/en/es/fr) → código de idioma do template no WhatsApp.
-const BASE_TO_TEMPLATE: Record<string, string> = { pt: "pt_BR", en: "en", es: "es", fr: "fr" };
-
-/**
- * Idioma do template para um telefone. Só retorna um idioma que esteja entre os
- * APROVADOS (config.reminders.locales) — caso contrário cai no fallback. Evita
- * tentar enviar numa tradução que ainda não existe no template (envio falharia).
- */
-function localeForPhone(phone: string, fallback: string): string {
-  const allowed = config.reminders.locales;
-  const inAllowed = (lang: string) => allowed.length === 0 || allowed.includes(lang);
-  const safeFallback = inAllowed(fallback) ? fallback : allowed[0] ?? fallback;
-  const lang = BASE_TO_TEMPLATE[languageForPhone(phone)] ?? fallback;
-  return inAllowed(lang) ? lang : safeFallback;
-}
-
 function firstName(full: string | null): string {
   if (!full) return "";
   return full.trim().split(/\s+/)[0] ?? "";
@@ -132,7 +117,7 @@ async function enviarLote(p: {
       continue;
     }
 
-    const locale = localeForPhone(to, config.reminders.defaultLocale);
+    const locale = escolherLocale({ idiomaPreferido: consent.idioma, phone: to, aprovados: config.reminders.locales, defaultLocale: config.reminders.defaultLocale }).locale;
     const ok = await sendTemplate({ to, template: p.template, locale, bodyParams: p.corpo(r) });
     if (!ok) {
       falhas++;
