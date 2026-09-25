@@ -25,9 +25,10 @@ import {
   getStalePendingReservations,
   logEscalation,
   markReminderSent,
-  isOptedOut,
   type ReminderRow,
+  podeReceberWhatsAppReservas,
 } from "./db.js";
+import { DETALHE_CONSENTIMENTO } from "./consentRegra.js";
 import { sendTemplate } from "./whatsapp.js";
 import { normalizePhone } from "./phone.js";
 import { languageForPhone } from "./locale.js";
@@ -125,9 +126,10 @@ async function enviarLote(p: {
       continue;
     }
     const to = tel.e164;
-    if (await isOptedOut(to)) {
-      await anotar("opt_out", r, { qualidadeTelefone: tel.qualidade, pais: tel.pais, motivo: "cliente optou por não receber" });
-      continue; // respeita opt-out
+    const consent = await podeReceberWhatsAppReservas(to); // opt-in (2026-09-25)
+    if (!consent.ok) {
+      await anotar(consent.motivo, r, { qualidadeTelefone: tel.qualidade, pais: tel.pais, motivo: DETALHE_CONSENTIMENTO[consent.motivo] });
+      continue;
     }
 
     const locale = localeForPhone(to, config.reminders.defaultLocale);

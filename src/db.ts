@@ -1,4 +1,5 @@
 import pg from "pg";
+import { decidirEnvioWhatsApp, type DecisaoConsentimento, type LinhaConsentimento } from "./consentRegra.js";
 import type Anthropic from "@anthropic-ai/sdk";
 import { config } from "./config.js";
 import { assertReadOnlySql } from "./sqlGuard.js";
@@ -837,6 +838,45 @@ export async function setOutboundConsent(
      ON CONFLICT (phone) DO UPDATE
        SET outbound_opted_out = $2, source = $3, updated_at = NOW()`,
     [phone, optedOut, source],
+  );
+}
+
+/** Linha de consentimento do número (E.164), ou null se nunca foi marcado. */
+export async function getConsentRow(phone: string): Promise<LinhaConsentimento | null> {
+  const { rows } = await pool.query<LinhaConsentimento>(
+    `SELECT whatsapp_reservas, outbound_opted_out, tipo FROM public.aria_contact_consent WHERE phone = $1`,
+    [phone],
+  );
+  return rows[0] ?? null;
+}
+
+/** Regra única de envio de WhatsApp de reservas (opt-in). Erro de banco = não envia. */
+export async function podeReceberWhatsAppReservas(phone: string): Promise<DecisaoConsentimento> {
+  try {
+    return decidirEnvioWhatsApp(await getConsentRow(phone));
+  } catch (err) {
+    console.warn("[consent] leitura falhou — tratando como sem opt-in:", err instanceof Error ? err.message : err);
+    return { ok: false, motivo: "sem_opt_in" };
+  }
+}
+
+/** Marca (ou desmarca) um número para receber WhatsApp de reservas. Nunca mexe no opt-out do cliente. */
+export async function setWhatsAppReservas(p: {
+  phone: string;
+  ligado: boolean;
+  tipo: "cliente" | "estabelecimento";
+  restaurantId?: string | null;
+  source: string;
+  motivo?: string | null;
+}): Promise<void> {
+  await pool.query(
+    `INSERT INTO public.aria_contact_consent (phone, whatsapp_reservas, tipo, restaurant_id, source, motivo, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, NOW())
+     ON CONFLICT (phone) DO UPDATE
+       SET whatsapp_reservas = EXCLUDED.whatsapp_reservas, tipo = EXCLUDED.tipo,
+           restaurant_id = COALESCE(EXCLUDED.restaurant_id, aria_contact_consent.restaurant_id),
+           source = EXCLUDED.source, motivo = EXCLUDED.motivo, updated_at = NOW()`,
+    [p.phone, p.ligado, p.tipo, p.restaurantId ?? null, p.source, p.motivo ?? null],
   );
 }
 

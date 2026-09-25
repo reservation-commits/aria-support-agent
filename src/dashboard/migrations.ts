@@ -201,6 +201,19 @@ export async function runDashboardMigrations(): Promise<void> {
         updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
     `);
+    // Opt-in de WhatsApp de reservas (decisão do fundador, 2026-09-25): só recebe quem
+    // está marcado. `tipo` = cliente | estabelecimento; `restaurant_id` quando for casa.
+    await client.query(`
+      ALTER TABLE public.aria_contact_consent
+        ADD COLUMN IF NOT EXISTS whatsapp_reservas BOOLEAN NOT NULL DEFAULT false,
+        ADD COLUMN IF NOT EXISTS tipo              TEXT    NOT NULL DEFAULT 'cliente',
+        ADD COLUMN IF NOT EXISTS restaurant_id     TEXT,
+        ADD COLUMN IF NOT EXISTS motivo            TEXT;
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS aria_contact_consent_optin_idx
+        ON public.aria_contact_consent (whatsapp_reservas) WHERE whatsapp_reservas;
+    `);
 
     // Avaliações de experiência (pós-visita). Guardadas até serem publicadas
     // na página do estabelecimento na plataforma (posted_to_platform).

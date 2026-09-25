@@ -13,7 +13,7 @@ import {
 } from "./webhook.js";
 import { getOrRestoreHistory, setHistory, getAllActiveSessions } from "./sessions.js";
 import {
-  markMessageProcessed, pruneProcessedMessages, detectUnaccent, setOutboundConsent, pool,
+  markMessageProcessed, pruneProcessedMessages, detectUnaccent, setOutboundConsent, setWhatsAppReservas, pool,
   savePendingWhatsApp, loadPendingWhatsApp, claimPendingWhatsApp, requeuePendingWhatsApp,
 } from "./db.js";
 import { detectConsentIntent, consentConfirmation } from "./consent.js";
@@ -33,6 +33,7 @@ import { startReminders } from "./reminders.js";
 import { startEmailChannel, handleInboundEmail } from "./emailChannel.js";
 import { tratarEventoReserva } from "./reservationEvents.js";
 import { verificarSegredoWebhook, STATUS_DE } from "./webhookAuth.js";
+import { avaliarTelefone, podeReceberWhatsApp } from "./phoneQuality.js";
 import { createDashboardRouter } from "./dashboard/routes.js";
 import { dashboardCredentials } from "./dashboard/auth.js";
 import { enqueueMessage, isBusy } from "./conversationQueue.js";
@@ -207,6 +208,49 @@ app.post("/webhook/email", (req, res) => {
 // Resposta síncrona de propósito: o n8n registra o desfecho de cada evento no
 // próprio histórico de execução, o que torna o fluxo auditável dos dois lados.
 // ─────────────────────────────────────────────────────────────────────────────
+/**
+ * Marca ou desmarca quem recebe WhatsApp de reservas (opt-in — fundador, 2026-09-25).
+ * Chamado pelo site (caixa "quero receber por WhatsApp") ou por um nó do n8n. Mesmo
+ * segredo dos eventos; sem segredo configurado a rota não existe (404).
+ * Corpo: { phone, whatsapp_reservas: true|false, tipo?: "cliente"|"estabelecimento",
+ *          restaurant_id?, source?, motivo? }
+ */
+app.post("/webhook/consent", (req, res) => {
+  const veredito = verificarSegredoWebhook({
+    habilitado: !!config.reservationEvents.secret,
+    esperado: config.reservationEvents.secret,
+    fornecido: req.header("x-aria-secret"),
+  });
+  if (veredito !== "ok") {
+    res.sendStatus(STATUS_DE[veredito]);
+    return;
+  }
+  const b = (req.body ?? {}) as Record<string, unknown>;
+  const tel = avaliarTelefone(typeof b.phone === "string" ? b.phone : "");
+  if (!podeReceberWhatsApp(tel)) {
+    res.status(400).json({ ok: false, motivo: "telefone_nao_enviavel", detalhe: `${tel.qualidade}: ${tel.motivo}` });
+    return;
+  }
+  if (typeof b.whatsapp_reservas !== "boolean") {
+    res.status(400).json({ ok: false, motivo: "payload_invalido", detalhe: "whatsapp_reservas deve ser true ou false" });
+    return;
+  }
+  const tipo = b.tipo === "estabelecimento" ? "estabelecimento" : "cliente";
+  setWhatsAppReservas({
+    phone: tel.e164,
+    ligado: b.whatsapp_reservas,
+    tipo,
+    restaurantId: typeof b.restaurant_id === "string" ? b.restaurant_id.slice(0, 64) : null,
+    source: typeof b.source === "string" ? b.source.slice(0, 40) : "webhook",
+    motivo: typeof b.motivo === "string" ? b.motivo.slice(0, 200) : null,
+  })
+    .then(() => res.json({ ok: true, phone_pais: tel.pais, tipo, whatsapp_reservas: b.whatsapp_reservas }))
+    .catch((err) => {
+      console.error("[consent] gravação falhou", err);
+      res.status(500).json({ ok: false, motivo: "erro", detalhe: "falha interna" });
+    });
+});
+
 app.post("/webhook/reservation-event", (req, res) => {
   const veredito = verificarSegredoWebhook({
     habilitado: config.reservationEvents.enabled,

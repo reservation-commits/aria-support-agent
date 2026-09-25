@@ -6,4 +6,4 @@
  * antiga — `/health` respondia apenas `{ok:true}`. Uma correção que não se pode verificar
  * não está verificada.
  */
-export const BUILD = "2026-09-22-v5-juiz-de-conversa-alerta-ferramenta-node22-sdk-novo";
+export const BUILD = "2026-09-25-v6-whatsapp-reservas-opt-in";

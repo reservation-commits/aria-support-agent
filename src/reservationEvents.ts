@@ -37,11 +37,12 @@
 import { config } from "./config.js";
 import {
   getReservationForEvent,
-  isOptedOut,
   liberarEnvio,
   logEscalation,
   reservarEnvio,
+  podeReceberWhatsAppReservas,
 } from "./db.js";
+import { DETALHE_CONSENTIMENTO } from "./consentRegra.js";
 import { publish } from "./dashboard/events.js";
 import { montarParametros, parsePayloadEvento } from "./eventFormat.js";
 import { languageForPhone } from "./locale.js";
@@ -58,6 +59,7 @@ export type AcaoEvento =
   | "reserva_nao_encontrada"
   | "telefone_nao_enviavel"
   | "opt_out"
+  | "sem_opt_in"
   | "dados_insuficientes"
   | "teto_diario"
   | "falha_envio";
@@ -165,9 +167,11 @@ async function decidir(body: unknown, ctx: Partial<RegistroSaida>): Promise<Resu
     return { acao: "telefone_nao_enviavel", detalhe: `${tel.qualidade}: ${tel.motivo}` };
   }
 
-  // 6 — consentimento.
-  if (await isOptedOut(tel.e164)) {
-    return { acao: "opt_out", detalhe: "cliente optou por não receber" };
+  // 6 — consentimento: OPT-IN (fundador, 2026-09-25). Só recebe quem está marcado em
+  // aria_contact_consent.whatsapp_reservas; "PARAR" desmarca de vez.
+  const consent = await podeReceberWhatsAppReservas(tel.e164);
+  if (!consent.ok) {
+    return { acao: consent.motivo, detalhe: DETALHE_CONSENTIMENTO[consent.motivo] };
   }
 
   // 7 — dados suficientes para uma mensagem CORRETA? Parâmetro vazio a Meta
