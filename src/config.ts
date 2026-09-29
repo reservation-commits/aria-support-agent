@@ -164,6 +164,12 @@ export const config = {
     } as Record<string, string>,
   },
 
+  revisao: {
+    // Revisão semântica ANTES do envio (revisao.ts). Ligada por padrão; desligar só em
+    // emergência — as regras da porta continuam valendo mesmo com isto off.
+    enabled: (process.env.REVISAO_PRE_ENVIO ?? "true").toLowerCase() !== "false",
+  },
+
   venueBriefing: {
     // Véspera para a CASA: nome, hora e pessoas, ~24h antes. Só casas marcadas.
     enabled: (process.env.VENUE_BRIEFING_ENABLED ?? "false").toLowerCase() === "true",

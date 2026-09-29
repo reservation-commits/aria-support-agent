@@ -24,7 +24,7 @@
 import axios from "axios";
 import type Anthropic from "@anthropic-ai/sdk";
 import { config } from "./config.js";
-import { runAgent } from "./claude.js";
+import { responderComRevisao } from "./entrega.js";
 import { emailChatId, emailIdentity } from "./identity.js";
 import { getOrRestoreHistory, setHistory } from "./sessions.js";
 import { enqueueMessage, isBusy } from "./conversationQueue.js";
@@ -36,7 +36,7 @@ import {
   clearPendingEmails,
   loadPendingEmails,
 } from "./db.js";
-import { sanitizeEmailReply, outboundGate, neutralizeSystemMarkers, idiomaProvavel } from "./format.js";
+import { sanitizeEmailReply, neutralizeSystemMarkers, idiomaProvavel } from "./format.js";
 import { recallMemories } from "./embeddings.js";
 import { resolveProfileKey } from "./identity.js";
 import { renderEmailHtml } from "./emailTemplate.js";
@@ -551,32 +551,17 @@ async function processEmailTurn(
   }
 
   const seed = history.length === 0 ? [systemHint] : [];
-  const { reply, updatedHistory } = await runAgent([...history, ...seed], userMsg, identity);
+  // Caminho único (entrega.ts): sanitiza, revisa (regras + leitura semântica), reescreve uma
+  // vez se preciso e retém com registro e escalação se ainda reprovar. Fail-closed.
+  const { reply, updatedHistory } = await responderComRevisao({
+    history, seed, userMsg, identity,
+    entrada: textFromBlocks(blocks), channel: "email", chatId, sender: ctx.to, subject: ctx.subject, sanitize: sanitizeEmailReply,
+  });
 
   setHistory(chatId, updatedHistory);
 
-  const clean = sanitizeEmailReply(reply);
+  const clean = reply;
   if (!clean) {
-    void clearPendingEmails(chatId).catch(() => {});
-    return;
-  }
-
-  // Porta única de saída, a mesma do WhatsApp: nota interna, relato de ação,
-  // dump de tool, marcador de silêncio, placeholder vazio ou resposta em idioma
-  // diferente do da mensagem recebida JAMAIS vão para o cliente. Fail-closed:
-  // na dúvida não envia, registra no painel e o MAESTRO revisa.
-  const portao = outboundGate(clean, textFromBlocks(blocks));
-  if (!portao.ok) {
-    console.warn(`[email] resposta barrada para ${ctx.to} — ${portao.motivo}`);
-    void logScopeBlock({
-      chatId,
-      channel: "email",
-      sender: ctx.to,
-      subject: ctx.subject,
-      layer: "outbound",
-      reason: `resposta barrada na saída: ${portao.motivo}`,
-      snippet: clean.slice(0, 300),
-    }).catch(() => {});
     void clearPendingEmails(chatId).catch(() => {});
     return;
   }

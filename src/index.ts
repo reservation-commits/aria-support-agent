@@ -20,9 +20,9 @@ import { detectConsentIntent, consentConfirmation } from "./consent.js";
 import { summarizeAndSaveSession } from "./summarizer.js";
 import { normalizePhone } from "./phone.js";
 import { whatsappIdentity } from "./identity.js";
-import { runAgent } from "./claude.js";
+import { responderComRevisao } from "./entrega.js";
 import { sendText, markAsReadWithTyping } from "./whatsapp.js";
-import { sanitizeReply, outboundGate } from "./format.js";
+import { sanitizeReply } from "./format.js";
 import { logMessage, logScopeBlock } from "./dashboard/logger.js";
 import { runDashboardMigrations } from "./dashboard/migrations.js";
 import { startMonitor } from "./monitor.js";
@@ -514,9 +514,12 @@ async function processTurn(
   }
 
   const seed = history.length === 0 ? [systemHint] : [];
-  let turno: Awaited<ReturnType<typeof runAgent>>;
+  let turno: Awaited<ReturnType<typeof responderComRevisao>>;
   try {
-    turno = await runAgent([...history, ...seed], userMsg, identity);
+    turno = await responderComRevisao({
+      history, seed, userMsg, identity,
+      entrada: textFromBlocks(blocks), channel: "whatsapp", chatId, sender: chatId, sanitize: sanitizeReply,
+    });
   } catch (err) {
     // O modelo falhou (crédito, chave, rede). Antes a mensagem morria aqui — a Meta já
     // recebeu o 200 e não reenvia. Agora vai para a fila de replay e o alerta URGENTE
@@ -530,26 +533,10 @@ async function processTurn(
 
   setHistory(chatId, updatedHistory);
 
-  const clean = sanitizeReply(reply);
+  // O caminho único (entrega.ts) já sanitizou, revisou (regras + leitura semântica),
+  // reescreveu uma vez se preciso e, se ainda assim reprovou, reteve com registro e escalação.
+  const clean = reply;
   if (!clean) return;
-
-  // Porta única de saída (a mesma do e-mail): nota interna, dump de tool, marcador
-  // de silêncio ou resposta em idioma diferente do da mensagem recebida NÃO saem.
-  // A supressão vira registro no painel — antes só existia um console.log, e uma
-  // supressão invisível é indistinguível de um agente que não respondeu.
-  const portao = outboundGate(clean, textFromBlocks(blocks));
-  if (!portao.ok) {
-    console.warn(`[agent] resposta barrada para ${chatId} — ${portao.motivo}`);
-    void logScopeBlock({
-      chatId,
-      channel: "whatsapp",
-      sender: chatId,
-      layer: "outbound",
-      reason: `resposta barrada na saída: ${portao.motivo}`,
-      snippet: clean.slice(0, 300),
-    }).catch(() => {});
-    return;
-  }
 
   // Enforce minimum reply delay so the bot doesn't feel robotic.
   const minMs = config.reply.minDelaySeconds * 1000;

@@ -499,6 +499,25 @@ export async function runDashboardMigrations(): Promise<void> {
         ON public.aria_quality_scores (judged_at DESC);
     `);
 
+    // Revisão ANTES do envio (revisao.ts): uma linha por tentativa, aprovada ou não.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS public.aria_prechecks (
+        id         BIGSERIAL PRIMARY KEY,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        chat_id    TEXT,
+        channel    TEXT,
+        tentativa  INTEGER NOT NULL DEFAULT 1,
+        aprovado   BOOLEAN NOT NULL,
+        origem     TEXT,
+        motivos    JSONB NOT NULL DEFAULT '[]'::jsonb,
+        snippet    TEXT
+      );
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS aria_prechecks_at_idx
+        ON public.aria_prechecks (created_at DESC);
+    `);
+
     // Semeia o histórico do ledger (idempotente; ON CONFLICT DO NOTHING).
     try {
       const { seedCampaignSends } = await import("./campaign.js");

@@ -159,6 +159,46 @@ export function motivoDeBloqueio(text: string): string | null {
   ];
   if (promessas.some((re) => re.test(t))) return "promete disponibilidade ou confirmação que não controlamos";
 
+  // 2c. Prazo ou data de retorno NOSSO. ADR-015 proíbe prazo de terceiro e de etapa humana, e a
+  //     "data em que voltamos" só é permitida com processo que a cumpra — e a Aria hospedada não
+  //     tem esse processo. Incidente de 29/09: "d'ici vendredi 3 octobre en fin de journée".
+  //     Data da RESERVA ("confirmada para sexta 3 de outubro às 20h") não casa: exige o verbo de prazo.
+  const DIA = "(lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche|segunda|ter[çc]a|quarta|quinta|sexta|s[áa]bado|domingo|monday|tuesday|wednesday|thursday|friday|saturday|sunday|lunes|martes|mi[ée]rcoles|jueves|viernes|s[áa]bado|domingo|luned[ìi]|marted[ìi]|mercoled[ìi]|gioved[ìi]|venerd[ìi]|sabato|domenica)";
+  const DATA = "(\\d{1,2}(?:st|nd|rd|th|º|°)?\\s+(?:de\\s+)?(?:janvier|f[ée]vrier|mars|avril|mai|juin|juillet|ao[ûu]t|septembre|octobre|novembre|d[ée]cembre|janeiro|fevereiro|mar[çc]o|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro|january|february|march|april|may|june|july|august|september|october|november|december|enero|febrero|marzo|mayo|junio|julio|septiembre|octubre|noviembre|diciembre|gennaio|febbraio|aprile|maggio|giugno|luglio|settembre|ottobre|dicembre)|\\d{1,2}/\\d{1,2})";
+  const prazos: RegExp[] = [
+    new RegExp("\\b(d'ici|avant|au plus tard|jusqu'[àa])\\s+(le\\s+)?" + DIA + "(?![a-z\\u00e0-\\u00ff])", "i"),
+    new RegExp("\\b(d'ici|avant|au plus tard|jusqu'[àa])\\s+(le\\s+)?" + DATA, "i"),
+    new RegExp("\\b(at[ée]|antes de|no m[áa]ximo at[ée])\\s+(a\\s+|o\\s+)?" + DIA + "(?![a-z\\u00e0-\\u00ff])", "i"),
+    new RegExp("\\b(at[ée]|antes de|no m[áa]ximo at[ée])\\s+(o\\s+dia\\s+)?" + DATA, "i"),
+    new RegExp("\\b(by|before|no later than)\\s+" + DIA + "(?![a-z\\u00e0-\\u00ff])", "i"),
+    new RegExp("\\b(by|before|no later than)\\s+(the\\s+)?" + DATA, "i"),
+    new RegExp("\\b(antes del?|a m[áa]s tardar el?|para el)\\s+" + DIA + "(?![a-z\\u00e0-\\u00ff])", "i"),
+    new RegExp("\\b(entro|prima di)\\s+(il\\s+)?" + DIA + "(?![a-z\\u00e0-\\u00ff])", "i"),
+    /\b(em at[ée]|dentro de|no prazo de)\s+\d{1,3}\s*(h\b|horas?|dias?)/i,
+    /\b(within|in)\s+(the\s+next\s+)?\d{1,3}\s*(h\b|hours?|days?|business days?|working days?)\b/i,
+    /\b(dans|sous|d'ici)\s+(les\s+)?\d{1,3}\s*(h\b|heures?|jours?)/i,
+    /\b(dentro de|en)\s+\d{1,3}\s*(h\b|horas?|d[íi]as?)\b/i,
+    /\b(entro)\s+\d{1,3}\s*(ore|giorni)\b/i,
+    /\b(fin de journ[ée]e|end of (the )?(day|week)|at[ée] o (fim|final) do dia|fim do dia de hoje)\b/i,
+  ];
+  if (prazos.some((re) => re.test(t))) return "promete prazo ou data de retorno";
+
+  // 2d. Processo interno exposto: relance, espera por terceiro, etapa humana, "registrei".
+  //     Vale em todo o texto — em 29/09 estava no meio de uma carta em francês bem formada.
+  const processo: RegExp[] = [
+    /\b(relancei|relan[çc]amos|j'ai relanc[ée]|nous avons relanc[ée]|je relance|nous relan[çc]ons)\b/i,
+    /\ben attente (de|d'une?) (r[ée]ponse|retour)\b/i,
+    /\b(aguardando|esperando|à espera d[ae]|no aguardo d[ae])\s+(a\s+|uma\s+)?(resposta|retorno)\s+d[oa]\s+(restaurante|casa|estabelecimento)\b/i,
+    /\b(waiting|wait) (for|on) (the )?(restaurant|venue)('s)? (reply|response|answer|confirmation)\b/i,
+    /\b(esperando|a la espera de) (la )?respuesta del restaurante\b/i,
+    /\bin attesa (di|della) risposta del ristorante\b/i,
+    /\b(human step|[ée]tape humaine|etapa humana|passo humano)\b/i,
+    /\b(i|we) (have |had )?(registered|recorded|logged|flagged|escalated|forwarded) (your|the|this)\b/i,
+    /\b(registrei|registramos|encaminhei|encaminhamos|escalei|escalamos) (o |a |seu |sua |este |esta )?(pedido|caso|solicita[çc][ãa]o)\b/i,
+    /\b(j'ai|nous avons) (enregistr[ée]|transmis|escalad[ée]) (votre|cette|la) (demande|requ[êe]te)\b/i,
+  ];
+  if (processo.some((re) => re.test(t))) return "expõe processo interno (relance, espera por terceiro, etapa humana)";
+
   // Forma: uma carta cumprimenta o destinatário e fala com ele. Isso decide o
   // rigor do item 3 — num texto que já é carta, uma frase-gatilho no meio pode
   // ser o agente citando um aviso que o cliente recebeu; num texto que não é
