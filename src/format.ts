@@ -103,7 +103,9 @@ export function containsSilenceMarker(text: string): boolean {
  * Política: fail-closed. Na dúvida a resposta é barrada, registrada e escalada —
  * nunca entregue. Silêncio é ruim; carta errada em nome da marca é pior.
  */
-export function motivoDeBloqueio(text: string): string | null {
+export type OpcoesPortao = { prazoPermitido?: boolean };
+
+export function motivoDeBloqueio(text: string, opts: OpcoesPortao = {}): string | null {
   const t = (text ?? "").trim();
   if (!t) return "resposta vazia";
   if (t === "..." || /^[.…\s]+$/.test(t)) return "resposta só com reticências (placeholder)";
@@ -181,7 +183,8 @@ export function motivoDeBloqueio(text: string): string | null {
     /\b(entro)\s+\d{1,3}\s*(ore|giorni)\b/i,
     /\b(fin de journ[ée]e|end of (the )?(day|week)|at[ée] o (fim|final) do dia|fim do dia de hoje)\b/i,
   ];
-  if (prazos.some((re) => re.test(t))) return "promete prazo ou data de retorno";
+  // Com compromisso registrado (registrar_compromisso), a data NOSSA é permitida — o processo existe.
+  if (!opts.prazoPermitido && prazos.some((re) => re.test(t))) return "promete prazo ou data de retorno";
 
   // 2d. Processo interno exposto: relance, espera por terceiro, etapa humana, "registrei".
   //     Vale em todo o texto — em 29/09 estava no meio de uma carta em francês bem formada.
@@ -268,8 +271,8 @@ export type PortaoSaida = { ok: true } | { ok: false; motivo: string };
  * Porta única de saída dos DOIS canais (WhatsApp e e-mail). Nenhuma proteção
  * pode voltar a existir só de um lado — era assim que as divergências nasciam.
  */
-export function outboundGate(resposta: string, entrada?: string): PortaoSaida {
-  const motivo = motivoDeBloqueio(resposta);
+export function outboundGate(resposta: string, entrada?: string, opts: OpcoesPortao = {}): PortaoSaida {
+  const motivo = motivoDeBloqueio(resposta, opts);
   if (motivo) return { ok: false, motivo };
 
   if (entrada) {

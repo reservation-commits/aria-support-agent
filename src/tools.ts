@@ -20,6 +20,8 @@ import {
   searchRestaurants,
   upsertCustomerProfile,
 } from "./db.js";
+import { validarDataCompromisso } from "./compromissoRegra.js";
+import { registrarCompromisso } from "./compromissosDb.js";
 import { logToolCall, logMessage } from "./dashboard/logger.js";
 import { emailDomainMatches, fetchReservation, manageReservation } from "./platformReservation.js";
 import { publish } from "./dashboard/events.js";
@@ -448,6 +450,20 @@ async function _execTool(
           phone: trustedPhone ?? undefined,
         });
         return { ok: true, data: rows };
+      }
+      case "registrar_compromisso": {
+        const chat = contactKey(identity);
+        if (!chat || !identity) return { ok: false, error: "Identidade do cliente indisponível." };
+        const v = validarDataCompromisso(String(input.data ?? ""), new Date());
+        if (!v.ok) return { ok: false, error: `Data recusada: ${v.motivo}.` };
+        const id = await registrarCompromisso({
+          chatId: chat,
+          channel: identity.channel,
+          due: v.due,
+          oQue: String(input.o_que ?? "").replace(/\s+/g, " ").trim().slice(0, 300),
+          reservationCode: typeof input.reservation_code === "string" ? input.reservation_code.trim().slice(0, 64) : null,
+        });
+        return { ok: true, data: { id, data_retorno: v.due, regra: "Cite esta data ao cliente na carta. A Aria voltará a ele nesse dia automaticamente." } };
       }
       case "set_outbound_consent": {
         if (!profileKey) return { ok: false, error: "Identidade do cliente indisponível." };

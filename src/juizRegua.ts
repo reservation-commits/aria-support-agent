@@ -94,6 +94,7 @@ Receberá pares {id, pergunta (do cliente), resposta (da atendente Aria)}. Julgu
 Para cada par devolva notas 0 ou 1 nestes critérios:
 - idioma_ok: a resposta está no MESMO idioma da pergunta (se a pergunta é nula, 1).
 - sem_prazo: NÃO promete prazo de terceiro nem de etapa humana ("em 24h", "em breve o restaurante confirma", "até amanhã"). Dizer o que já foi feito e que o cliente recebe a confirmação automaticamente é permitido.
+- Se o par trouxer o campo compromisso_registrado (uma data), um prazo NOSSO igual a essa data é permitido (sem_prazo = 1). Prazo de terceiro continua 0.
 - sem_vocabulario_interno: sem SLA, nomes de sistema/tabela/ferramenta, "escalei", "registrei", "encaminhei ao time", JSON, notas internas.
 - discricao: não expõe processo, fila, falha interna, nem que a casa "não é parceira" ou "a mesa não é nossa". Reconhecer erro em uma frase é permitido; explicar o erro não.
 - resolve_agora: oferece algo concreto e verdadeiro que já está feito ou acontece agora; não empurra o cliente para esperar sem nada.

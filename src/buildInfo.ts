@@ -6,4 +6,4 @@
  * antiga — `/health` respondia apenas `{ok:true}`. Uma correção que não se pode verificar
  * não está verificada.
  */
-export const BUILD = "2026-09-29-v10-revisao-antes-do-envio-reescrita-retencao";
+export const BUILD = "2026-09-29-v11-compromisso-com-data-cumprido-pela-aria";

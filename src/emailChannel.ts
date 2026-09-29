@@ -177,7 +177,7 @@ function findAttachments(payload: GmailPart | undefined): AttachmentRef[] {
 // A fila coalesce emails em rajada num turno só; a resposta vai para a thread
 // do email MAIS RECENTE daquele remetente.
 
-type ReplyContext = {
+export type ReplyContext = {
   to: string;
   subject: string | null;
   threadId: string | null;
@@ -556,6 +556,7 @@ async function processEmailTurn(
   const { reply, updatedHistory } = await responderComRevisao({
     history, seed, userMsg, identity,
     entrada: textFromBlocks(blocks), channel: "email", chatId, sender: ctx.to, subject: ctx.subject, sanitize: sanitizeEmailReply,
+    emailCtx: { to: ctx.to, subject: ctx.subject, gmailMessageId: ctx.gmailMessageId, threadId: ctx.threadId, mailbox: ctx.mailbox, messageIdHeader: ctx.messageIdHeader, references: ctx.references },
   });
 
   setHistory(chatId, updatedHistory);
@@ -576,6 +577,11 @@ async function processEmailTurn(
 }
 
 // ─── Envio (mesma thread, headers de threading corretos) ────────────────────
+
+/** Envio iniciado por nós (compromissos.ts): mesma thread quando o contexto foi guardado. */
+export async function enviarEmailProativo(ctx: ReplyContext, body: string, idioma?: string): Promise<boolean> {
+  return sendReply(ctx, body, idioma);
+}
 
 async function sendReply(ctx: ReplyContext, body: string, idioma?: string): Promise<boolean> {
   // Modo n8n: o envio é delegado ao fluxo do n8n (nó Gmail já autenticado).

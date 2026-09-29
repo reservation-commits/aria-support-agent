@@ -301,6 +301,20 @@ export const tools: Anthropic.Tool[] = [
     },
   },
   {
+    name: "registrar_compromisso",
+    description:
+      "Registrar um COMPROMISSO DE RETORNO com o cliente: a data em que VOCÊ volta a ele com resposta ou alternativas. Use SEMPRE que for citar uma data de retorno na carta — sem este registro a data é proibida e a carta é barrada. A Aria volta ao cliente nessa data automaticamente. Máximo 7 dias à frente. NUNCA registre prazo de terceiro (resposta do restaurante): o compromisso é seu.",
+    input_schema: {
+      type: "object",
+      properties: {
+        data: { type: "string", description: "Data do SEU retorno ao cliente, formato AAAA-MM-DD (hoje até 7 dias)" },
+        o_que: { type: "string", description: "O que você trará nessa data (ex.: 'confirmação ou duas casas alternativas para 3/10')" },
+        reservation_code: { type: "string", description: "Código da reserva, se houver" },
+      },
+      required: ["data", "o_que"],
+    },
+  },
+  {
     name: "set_outbound_consent",
     description:
       "Registrar a preferência do cliente sobre receber mensagens PROATIVAS (lembrete de reserva e convite de avaliação). Use quando o cliente pedir, durante a conversa, para parar de receber essas mensagens (opt_out=true) ou para voltar a recebê-las (opt_out=false). Não afeta o atendimento normal — o cliente continua podendo falar com você. Sempre confirme a mudança com gentileza. O telefone é resolvido pelo servidor.",

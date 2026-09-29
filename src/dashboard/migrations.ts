@@ -518,6 +518,27 @@ export async function runDashboardMigrations(): Promise<void> {
         ON public.aria_prechecks (created_at DESC);
     `);
 
+    // Compromissos de retorno com data (ADR-015): a Aria registra e cumpre (compromissos.ts).
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS public.aria_commitments (
+        id               BIGSERIAL PRIMARY KEY,
+        created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        chat_id          TEXT NOT NULL,
+        channel          TEXT NOT NULL,
+        due_at           DATE NOT NULL,
+        o_que            TEXT,
+        reservation_code TEXT,
+        status           TEXT NOT NULL DEFAULT 'aberto',
+        email_ctx        JSONB,
+        nudged_at        TIMESTAMPTZ,
+        fulfilled_at     TIMESTAMPTZ
+      );
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS aria_commitments_due_idx
+        ON public.aria_commitments (status, due_at);
+    `);
+
     // Semeia o histórico do ledger (idempotente; ON CONFLICT DO NOTHING).
     try {
       const { seedCampaignSends } = await import("./campaign.js");
