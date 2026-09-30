@@ -41,7 +41,11 @@ export type QualidadeTelefone =
 
 export type AvaliacaoTelefone = {
   qualidade: QualidadeTelefone;
-  /** E.164 pronto para envio. Preenchido SOMENTE quando `ENVIAVEL`. */
+  /**
+   * E.164 do número válido. Preenchido em `ENVIAVEL` e em `ENVIAVEL_NAO_MOVEL` (linha fixa válida —
+   * v12: casa marcada pelo fundador pode receber no fixo). Para o CLIENTE, o único portão continua
+   * sendo `podeReceberWhatsApp`, que exige `ENVIAVEL`.
+   */
   e164: string | null;
   pais: string | null;
   tipo: string | null;
@@ -89,7 +93,7 @@ export function avaliarTelefone(bruto: string | null | undefined): AvaliacaoTele
     const movel = TIPO_MOVEL.has(intl.tipo);
     return {
       qualidade: movel ? "ENVIAVEL" : "ENVIAVEL_NAO_MOVEL",
-      e164: movel ? intl.e164 : null,
+      e164: intl.e164,
       pais: intl.pais,
       tipo: intl.tipo,
       motivo: movel ? `válido em ${intl.pais}` : `linha ${intl.tipo} em ${intl.pais} — sem WhatsApp`,

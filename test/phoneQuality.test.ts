@@ -27,8 +27,9 @@ test("tolera lixo de formatação sem mudar o veredito", () => {
 test("linha fixa é válida mas não recebe WhatsApp", () => {
   const a = avaliarTelefone("+551133334444"); // fixo em São Paulo
   assert.equal(a.qualidade, "ENVIAVEL_NAO_MOVEL");
-  assert.equal(a.e164, null, "não pode expor um destino que não entrega");
-  assert.equal(podeReceberWhatsApp(a), false);
+  // v12: o E.164 fica disponível (casa marcada pode receber no fixo), mas o portão do CLIENTE continua fechado.
+  assert.equal(a.e164, "+551133334444");
+  assert.equal(podeReceberWhatsApp(a), false, "cliente em linha fixa nunca recebe");
 });
 
 test("celular brasileiro sem o código do país NÃO vira destino", () => {
