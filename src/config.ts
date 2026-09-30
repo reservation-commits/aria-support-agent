@@ -254,7 +254,41 @@ export const config = {
     enabled: (process.env.BRIEFING_ENABLED ?? "false").toLowerCase() === "true",
     template: process.env.BRIEFING_TEMPLATE ?? "",
     hoursBefore: Number(process.env.BRIEFING_HOURS_BEFORE ?? 24),
+    // v16: variante com endereço ({{6}}) e botão "Ver no mapa". Usada quando a casa tem
+    // endereço (100% das publicadas em 30/09); senão cai no template acima. Vazio = só o acima.
+    templateMap: process.env.BRIEFING_TEMPLATE_MAP ?? "",
   },
+
+  // v16 (2026-09-30): as mensagens que faltavam. Template vazio = etapa desligada, sem finding.
+  pendingNudge: {
+    // Cliente, 24 h depois do pedido ainda pendente (mesa a mais de 24 h): "seu pedido segue conosco",
+    // com botões "procurar outra mesa" / "prefiro aguardar".
+    template: process.env.PENDING_NUDGE_TEMPLATE ?? "",
+    hours: Number(process.env.PENDING_NUDGE_HOURS ?? 24),
+    minHoursAhead: Number(process.env.PENDING_NUDGE_MIN_HOURS_AHEAD ?? 24),
+  },
+  pendingClose: {
+    // Cliente, quando faltam ≤ 20 h para a mesa e o pedido segue pendente (≥ 2 h de vida, ≥ 1 h de
+    // antecedência): "não conseguimos confirmar a tempo, não conte com ela" + alternativa.
+    template: process.env.PENDING_CLOSE_TEMPLATE ?? "",
+    hoursBefore: Number(process.env.PENDING_CLOSE_HOURS_BEFORE ?? 20),
+    minAgeHours: Number(process.env.PENDING_CLOSE_MIN_AGE_HOURS ?? 2),
+  },
+  venueNudge: {
+    // Casa, 24 h depois do pedido ainda pendente (mesa a mais de 3 h): "pedido aguardando resposta", com botão.
+    template: process.env.VENUE_NUDGE_TEMPLATE ?? "",
+    hours: Number(process.env.VENUE_NUDGE_HOURS ?? 24),
+    minHoursAhead: Number(process.env.VENUE_NUDGE_MIN_HOURS_AHEAD ?? 3),
+  },
+  venueAgenda: {
+    // Casa, véspera: uma mensagem só com as mesas de amanhã quando há 2 ou mais, a partir das
+    // `localHour` (hora local da casa). Com 1 mesa continua a véspera por reserva.
+    template: process.env.VENUE_AGENDA_TEMPLATE ?? "",
+    localHour: Number(process.env.VENUE_AGENDA_LOCAL_HOUR ?? 10),
+  },
+  // Quais booking_status contam como "pendente" para as mensagens acima.
+  pendingStatuses: (process.env.PENDING_STATUSES ?? "pending,in treatment")
+    .split(",").map((s) => s.trim()).filter(Boolean),
 
   review: {
     // Pós-experiência: mensagem ~6h DEPOIS da reserva, agradecendo e convidando

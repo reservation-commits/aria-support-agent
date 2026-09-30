@@ -22,14 +22,19 @@ import {
   getReservationsForReminder,
   liberarEnvio,
   logEscalation,
+  codigoAgenda,
+  getAgendaAmanhaCasas,
+  getPendingForNudge,
   markReminderSent,
   pool,
   reservarEnvio,
+  type AgendaRow,
   type EventReservationRow,
   type ReminderRow,
 } from "./db.js";
 import { publish } from "./dashboard/events.js";
-import type { PayloadEvento } from "./eventFormat.js";
+import { formatarData, formatarHora, formatarPessoas, toYMD, type PayloadEvento } from "./eventFormat.js";
+import { montarListaAgenda } from "./pendenciaRegra.js";
 import { contarEnviosHoje, registrarSaida, type RegistroSaida } from "./outboundLog.js";
 import { avaliarTelefone, podeReceberWhatsApp } from "./phoneQuality.js";
 import { escolherLocale } from "./templateLocale.js";
@@ -94,6 +99,8 @@ async function enviarParaCasa(p: {
   origem: RegistroSaida["origem"];
   traceId?: string;
   botaoUrlParam?: string;
+  /** v16: parâmetros próprios (agenda), no lugar da ficha padrão da reserva. */
+  montar?: (pais: string | null) => string[] | null;
 }): Promise<ResultadoEstabelecimento> {
   const code = p.r.reservation_code;
   const base: Partial<RegistroSaida> = { origem: p.origem, evento: `${p.evento}:estabelecimento`, reservationCode: code, template: p.template, traceId: p.traceId ?? null };
@@ -122,7 +129,7 @@ async function enviarParaCasa(p: {
       continue;
     }
     const numero = tel.e164 as string;
-    const params = montarParametrosEstabelecimento(p.r, tel.pais);
+    const params = p.montar ? p.montar(tel.pais) : montarParametrosEstabelecimento(p.r, tel.pais);
     if (!params) {
       await anotar("dados_insuficientes", { pais: tel.pais, motivo: "faltam campos (casa, data, hora, pessoas ou nome do cliente)" });
       await finding(`'${p.evento}' para a casa: reserva ${code} sem dados suficientes — nada enviado`, code);
@@ -214,16 +221,104 @@ export async function sweepVesperaEstabelecimento(): Promise<void> {
   if (rows.length) console.log(`[vespera-casa] ${rows.length} reserva(s) avaliada(s)`);
 }
 
-export function startVenueReminders(): void {
-  if (!config.venueBriefing.enabled) return;
-  if (!config.venueBriefing.template) {
-    console.warn("[vespera-casa] VENUE_BRIEFING_ENABLED=true porém VENUE_BRIEFING_TEMPLATE vazio — não iniciado");
+// ─── v16: pedido aguardando resposta (24 h) e agenda única de amanhã ─────────
+
+const KIND_VENUE_NUDGE = "venue_nudge";
+const KIND_VENUE_AGENDA = "venue_agenda";
+
+/**
+ * "Pedido aguardando resposta": 24 h depois do pedido, se a casa marcada ainda não respondeu e a
+ * mesa está a mais de 3 h. Mesmo botão do pedido novo. Uma vez por pedido.
+ */
+export async function sweepLembretePedidoCasa(): Promise<void> {
+  let rows: ReminderRow[] = [];
+  try {
+    rows = await getPendingForNudge(KIND_VENUE_NUDGE, config.venueNudge.hours, config.venueNudge.minHoursAhead, config.pendingStatuses, true);
+  } catch (err) {
+    console.warn("[lembrete-casa] falha ao buscar pedidos:", err instanceof Error ? err.message : err);
     return;
   }
+  for (const r of rows) {
+    const res = await enviarParaCasa({ evento: "pedido_lembrete", template: config.venueNudge.template, r, origem: "reminder", botaoUrlParam: r.reservation_code });
+    if (res.acao !== "sem_destinatario" && res.acao !== "teto_diario") {
+      await markReminderSent(r.reservation_code, KIND_VENUE_NUDGE, r.restaurant_id ?? "").catch(() => {});
+    }
+  }
+  if (rows.length) console.log(`[lembrete-casa] ${rows.length} pedido(s) avaliado(s)`);
+}
+
+/**
+ * Agenda de amanhã: uma mensagem por casa quando há 2 ou mais mesas aceitas no dia seguinte
+ * (hora local ≥ config.venueAgenda.localHour). As mesas da agenda ficam marcadas como véspera
+ * enviada, para não receberem também o aviso individual. Com 1 mesa, a véspera por reserva cuida.
+ */
+export async function sweepAgendaCasa(): Promise<void> {
+  let rows: AgendaRow[] = [];
+  try {
+    rows = await getAgendaAmanhaCasas(config.venueAgenda.localHour, [config.reminders.status]);
+  } catch (err) {
+    console.warn("[agenda-casa] falha ao buscar mesas:", err instanceof Error ? err.message : err);
+    return;
+  }
+  const porCasa = new Map<string, AgendaRow[]>();
+  for (const r of rows) porCasa.set(r.restaurant_id, [...(porCasa.get(r.restaurant_id) ?? []), r]);
+
+  let agendas = 0;
+  for (const [restaurantId, mesas] of porCasa) {
+    if (mesas.length < 2) continue;
+    const primeira = mesas[0];
+    const ymd = toYMD(primeira.booking_date);
+    if (!ymd) continue;
+    const codigo = codigoAgenda(restaurantId, ymd);
+    const r: ReminderRow = {
+      reservation_code: codigo, restaurant_id: restaurantId, restaurant_name: primeira.restaurant_name, city: primeira.city,
+      booking_date: primeira.booking_date, reservation_time: null, people: null, customer_phone: null, customer_name: null, tz_valido: true,
+    };
+    const res = await enviarParaCasa({
+      evento: "agenda",
+      template: config.venueAgenda.template,
+      r,
+      origem: "briefing",
+      // {{1}} casa · {{2}} data · {{3}} quantidade · {{4}} lista "19:30 Anna Lee (2) · 20:00 …"
+      montar: (pais) => {
+        const lista = montarListaAgenda(mesas.map((m) => ({
+          hora: formatarHora(m.reservation_time, pais),
+          cliente: (m.customer_name ?? "").replace(/\s+/g, " ").trim(),
+          pessoas: formatarPessoas(m.people),
+        })));
+        const params = [primeira.restaurant_name ?? "", formatarData(primeira.booking_date, pais), String(mesas.length), lista];
+        return params.every((x) => x.length > 0) ? params : null;
+      },
+    });
+    if (res.acao !== "sem_destinatario" && res.acao !== "teto_diario") {
+      agendas++;
+      await markReminderSent(codigo, KIND_VENUE_AGENDA, restaurantId).catch(() => {});
+      for (const m of mesas) await markReminderSent(m.reservation_code, KIND_VENUE_BRIEFING, restaurantId).catch(() => {});
+    }
+  }
+  if (agendas) console.log(`[agenda-casa] ${agendas} agenda(s) de amanhã enviada(s)`);
+}
+
+export function startVenueReminders(): void {
+  const vesperaOn = config.venueBriefing.enabled && !!config.venueBriefing.template;
+  const lembreteOn = !!config.venueNudge.template; // v16
+  const agendaOn = !!config.venueAgenda.template; // v16
+  if (config.venueBriefing.enabled && !config.venueBriefing.template) {
+    console.warn("[vespera-casa] VENUE_BRIEFING_ENABLED=true porém VENUE_BRIEFING_TEMPLATE vazio — não iniciado");
+  }
+  if (!vesperaOn && !lembreteOn && !agendaOn) return;
   const intervalMs = config.reminders.sweepMinutes * 60_000;
+  // Sequencial de propósito: a agenda marca as mesas ANTES de a véspera individual olhar para elas.
+  const tick = async () => {
+    if (agendaOn) await sweepAgendaCasa();
+    if (vesperaOn) await sweepVesperaEstabelecimento();
+    if (lembreteOn) await sweepLembretePedidoCasa();
+  };
   setTimeout(() => {
-    void sweepVesperaEstabelecimento();
-    setInterval(() => void sweepVesperaEstabelecimento(), intervalMs).unref();
+    void tick();
+    setInterval(() => void tick(), intervalMs).unref();
   }, 60_000).unref();
-  console.log(`[vespera-casa] lembrete à casa ${config.venueBriefing.hoursBefore}h antes ativo`);
+  if (vesperaOn) console.log(`[vespera-casa] lembrete à casa ${config.venueBriefing.hoursBefore}h antes ativo`);
+  if (lembreteOn) console.log(`[lembrete-casa] "pedido aguardando resposta" ${config.venueNudge.hours}h depois · template '${config.venueNudge.template}'`);
+  if (agendaOn) console.log(`[agenda-casa] agenda de amanhã a partir das ${config.venueAgenda.localHour}h locais · template '${config.venueAgenda.template}'`);
 }

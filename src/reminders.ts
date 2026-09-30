@@ -21,6 +21,8 @@
 import { config } from "./config.js";
 import {
   getDistinctBookingStatuses,
+  getPendingForClose,
+  getPendingForNudge,
   getReservationsForReminder,
   getStalePendingReservations,
   logEscalation,
@@ -33,6 +35,7 @@ import { sendTemplate } from "./whatsapp.js";
 import { normalizePhone } from "./phone.js";
 import { escolherLocale } from "./templateLocale.js";
 import { formatarData, formatarHora, formatarPessoas } from "./eventFormat.js";
+import { consultaMapa, enderecoParaFicha } from "./pendenciaRegra.js";
 import { publish } from "./dashboard/events.js";
 import { registrarSaida, type OrigemSaida, type RegistroSaida } from "./outboundLog.js";
 import { avaliarTelefone, podeReceberWhatsApp } from "./phoneQuality.js";
@@ -68,14 +71,18 @@ async function enviarLote(p: {
   rotulo: string;
   origem: OrigemSaida;
   rows: ReminderRow[];
-  template: string;
+  /** Nome do template, fixo ou escolhido por reserva (v16: véspera com mapa quando há endereço). */
+  template: string | ((r: ReminderRow) => string);
   /** Nome do evento no painel — preservado por varredura para não mudar o log. */
   evento: (locale: string) => string;
   corpo: (r: ReminderRow, pais: string | null) => string[];
+  /** Sufixo do botão de URL do template (v16: consulta do mapa). */
+  botaoUrl?: (r: ReminderRow) => string | undefined;
 }): Promise<void> {
   let enviados = 0;
   let falhas = 0;
   const semFuso: string[] = [];
+  const nomeTemplate = (r: ReminderRow) => (typeof p.template === "function" ? p.template(r) : p.template);
 
   // Todo desfecho é registrado, inclusive o não-envio: é ele que diz, no
   // canário, se a trava está calibrada ou engolindo cliente legítimo.
@@ -84,7 +91,7 @@ async function enviarLote(p: {
       origem: p.origem,
       evento: p.kind,
       reservationCode: r.reservation_code,
-      template: p.template,
+      template: nomeTemplate(r),
       desfecho,
       ...extra,
     });
@@ -125,7 +132,7 @@ async function enviarLote(p: {
       await anotar("dados_insuficientes", r, { locale, qualidadeTelefone: tel.qualidade, pais: tel.pais, motivo: "parâmetro vazio (nome, casa, data, hora ou pessoas)" });
       continue;
     }
-    const ok = await sendTemplate({ to, template: p.template, locale, bodyParams });
+    const ok = await sendTemplate({ to, template: nomeTemplate(r), locale, bodyParams, buttonUrlParam: p.botaoUrl?.(r) });
     if (!ok) {
       falhas++;
       await anotar("falha_envio", r, { locale, qualidadeTelefone: tel.qualidade, pais: tel.pais, motivo: "Cloud API recusou o envio" });
@@ -151,7 +158,7 @@ async function enviarLote(p: {
     await reportarFalha(
       p.rotulo,
       `${falhas} de ${p.rows.length} envios '${p.kind}' falharam na Cloud API — ` +
-        `verificar aprovação do template '${p.template}' nos idiomas em uso e a validade do número de destino.`,
+        `verificar aprovação do template '${nomeTemplate(p.rows[0])}' nos idiomas em uso e a validade do número de destino.`,
     );
   }
   if (semFuso.length > 0) {
@@ -208,14 +215,16 @@ async function sweepBriefing(): Promise<void> {
   }
   if (rows.length === 0) return;
 
+  // v16: com endereço na ficha, vai a variante com {{6}} endereço e botão "Ver no mapa".
+  const comMapa = (r: ReminderRow) => !!config.briefing.templateMap && enderecoParaFicha(r.address).length > 0;
   await enviarLote({
     kind: KIND_BRIEFING,
     rotulo: "briefing",
     origem: "briefing",
     rows,
-    template: config.briefing.template,
+    template: (r) => (comMapa(r) ? config.briefing.templateMap : config.briefing.template),
     evento: (locale) => `briefing_${locale}`,
-    // {{1}} nome · {{2}} restaurante · {{3}} data por extenso · {{4}} hora · {{5}} pessoas.
+    // {{1}} nome · {{2}} restaurante · {{3}} data por extenso · {{4}} hora · {{5}} pessoas · [{{6}} endereço].
     // Antes a data saía "03/10" — para um americano, 10 de março (corrigido 2026-09-25).
     corpo: (r, pais) => [
       firstName(r.customer_name),
@@ -223,7 +232,69 @@ async function sweepBriefing(): Promise<void> {
       formatarData(r.booking_date, pais),
       formatarHora(r.reservation_time, pais),
       formatarPessoas(r.people),
+      ...(comMapa(r) ? [enderecoParaFicha(r.address)] : []),
     ],
+    botaoUrl: (r) => (comMapa(r) ? consultaMapa(r.restaurant_name, r.city) : undefined),
+  });
+}
+
+// ─── v16: pendência viva merece uma palavra ao cliente ────────────────────────
+
+const KIND_PENDING_NUDGE = "pending_nudge";
+const KIND_PENDING_CLOSE = "pending_close";
+
+/** Parâmetros comuns das duas mensagens de pendência: {{1}} nome · {{2}} casa · {{3}} data · {{4}} hora. */
+function corpoPendencia(r: ReminderRow, pais: string | null): string[] {
+  return [firstName(r.customer_name), r.restaurant_name ?? "", formatarData(r.booking_date, pais), formatarHora(r.reservation_time, pais)];
+}
+
+/**
+ * "Seu pedido segue conosco": 24 h depois do pedido, se ainda pendente e a mesa a mais de 24 h.
+ * Não diz que a casa não respondeu (discrição, ADR-015); oferece procurar alternativa — o botão
+ * volta como texto e a Aria conduz (FLUXO 4B do prompt).
+ */
+async function sweepPendingNudge(): Promise<void> {
+  let rows: ReminderRow[] = [];
+  try {
+    rows = await getPendingForNudge(KIND_PENDING_NUDGE, config.pendingNudge.hours, config.pendingNudge.minHoursAhead, config.pendingStatuses);
+  } catch (err) {
+    console.warn("[pendente-cliente] falha ao buscar pedidos:", err instanceof Error ? err.message : err);
+    return;
+  }
+  if (rows.length === 0) return;
+  await enviarLote({
+    kind: KIND_PENDING_NUDGE,
+    rotulo: "pendente-cliente",
+    origem: "reminder",
+    rows,
+    template: config.pendingNudge.template,
+    evento: (locale) => `pending_nudge_${locale}`,
+    corpo: corpoPendencia,
+  });
+}
+
+/**
+ * Encerramento honesto: faltam ≤ 20 h para a mesa e o pedido segue pendente. O cliente não pode
+ * aparecer no restaurante contando com uma mesa que ninguém confirmou. Se a casa aceitar depois,
+ * o evento "aceito" manda a confirmação normalmente.
+ */
+async function sweepPendingClose(): Promise<void> {
+  let rows: ReminderRow[] = [];
+  try {
+    rows = await getPendingForClose(KIND_PENDING_CLOSE, config.pendingClose.hoursBefore, config.pendingClose.minAgeHours, config.pendingStatuses);
+  } catch (err) {
+    console.warn("[pendente-encerrar] falha ao buscar pedidos:", err instanceof Error ? err.message : err);
+    return;
+  }
+  if (rows.length === 0) return;
+  await enviarLote({
+    kind: KIND_PENDING_CLOSE,
+    rotulo: "pendente-encerrar",
+    origem: "reminder",
+    rows,
+    template: config.pendingClose.template,
+    evento: (locale) => `pending_close_${locale}`,
+    corpo: corpoPendencia,
   });
 }
 
@@ -333,6 +404,8 @@ export function startReminders(): void {
   const reviewOn = config.review.enabled && !!config.review.template;
   const pendingOn = config.pendingWatch.enabled;
   const briefingOn = config.briefing.enabled && !!config.briefing.template;
+  const nudgeOn = !!config.pendingNudge.template; // v16
+  const closeOn = !!config.pendingClose.template; // v16
 
   if (config.reminders.enabled && !config.reminders.template)
     console.warn("[reminders] REMINDERS_ENABLED=true porém REMINDERS_TEMPLATE vazio — lembrete 2h não iniciado");
@@ -341,7 +414,7 @@ export function startReminders(): void {
   if (config.briefing.enabled && !config.briefing.template)
     console.warn("[briefing] BRIEFING_ENABLED=true porém BRIEFING_TEMPLATE vazio — briefing de véspera não iniciado");
 
-  if (!remindersOn && !reviewOn && !pendingOn && !briefingOn) {
+  if (!remindersOn && !reviewOn && !pendingOn && !briefingOn && !nudgeOn && !closeOn) {
     console.log("[reminders] outbound desativado (lembrete 2h, briefing 24h, avaliação 6h e pending-watch off)");
     return;
   }
@@ -352,12 +425,15 @@ export function startReminders(): void {
     if (briefingOn) void sweepBriefing();
     if (reviewOn) void sweepReview();
     if (pendingOn) void sweepPending();
+    if (nudgeOn) void sweepPendingNudge();
+    if (closeOn) void sweepPendingClose();
   };
   setTimeout(() => {
     const esperados = [
       ...(remindersOn || briefingOn ? [config.reminders.status] : []),
       ...(reviewOn ? [config.review.status] : []),
       ...(pendingOn ? [config.pendingWatch.status] : []),
+      ...(nudgeOn || closeOn ? config.pendingStatuses : []),
     ];
     void conferirStatusConfigurados(esperados);
     tick();
@@ -372,4 +448,10 @@ export function startReminders(): void {
     console.log(`[review] convite de avaliação ${config.review.hoursAfter}h após ativo · status='${config.review.status}'`);
   if (pendingOn)
     console.log(`[pending-watch] escalação automática após ${config.pendingWatch.hours}h em '${config.pendingWatch.status}'`);
+  if (nudgeOn)
+    console.log(`[pendente-cliente] "seu pedido segue conosco" ${config.pendingNudge.hours}h depois do pedido · template '${config.pendingNudge.template}'`);
+  if (closeOn)
+    console.log(`[pendente-encerrar] encerramento honesto a ${config.pendingClose.hoursBefore}h da mesa · template '${config.pendingClose.template}'`);
+  if (briefingOn && config.briefing.templateMap)
+    console.log(`[briefing] véspera com endereço e mapa · template '${config.briefing.templateMap}'`);
 }

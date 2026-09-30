@@ -6,4 +6,4 @@
  * antiga — `/health` respondia apenas `{ok:true}`. Uma correção que não se pode verificar
  * não está verificada.
  */
-export const BUILD = "2026-09-30-v15-templates-v2-data-por-extenso";
+export const BUILD = "2026-09-30-v16-pendencias-falam-mapa-agenda";

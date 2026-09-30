@@ -13,7 +13,8 @@
 
 import { formatarData, formatarHora, formatarPessoas, type DadosEvento } from "./eventFormat.js";
 
-export const EVENTOS_ESTABELECIMENTO = ["pedido_recebido", "cancelado", "vespera"] as const;
+// v16: "pedido_lembrete" (24 h sem resposta) e "agenda" (mesas de amanhã, uma mensagem por casa).
+export const EVENTOS_ESTABELECIMENTO = ["pedido_recebido", "cancelado", "vespera", "pedido_lembrete", "agenda"] as const;
 export type EventoEstabelecimento = (typeof EVENTOS_ESTABELECIMENTO)[number];
 
 export function ehEventoEstabelecimento(v: string): v is EventoEstabelecimento {

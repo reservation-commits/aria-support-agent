@@ -897,6 +897,8 @@ export type ReminderRow = {
   restaurant_id?: string | null;
   restaurant_name: string | null;
   city: string | null;
+  /** Endereço da casa (v16: véspera com endereço e botão de mapa). */
+  address?: string | null;
   booking_date: string | Date;
   reservation_time: string | null;
   people: number | null;
@@ -954,6 +956,7 @@ export async function getReservationsForReminder(
 ): Promise<ReminderRow[]> {
   const { rows } = await pool.query(
     `SELECT r.reservation_code, r.restaurant_id, d.name AS restaurant_name, d.city,
+            d.address_of_establishment AS address,
             r.booking_date, r.reservation_time, r.people,
             u.phone AS customer_phone, u.name AS customer_name,
             (z.name IS NOT NULL) AS tz_valido,
@@ -1136,6 +1139,122 @@ export async function getStalePendingReservations(
       ORDER BY r.created_date ASC
       LIMIT 100`,
     [String(hours), normalizarStatus(status)],
+  );
+  return rows;
+}
+
+// ─── v16 (2026-09-30): pendências vivas que merecem uma palavra ──────────────
+//
+// As mensagens que faltavam: "seu pedido segue conosco" (cliente, 24 h depois),
+// encerramento honesto (cliente, na véspera), lembrete à casa (24 h depois) e a
+// agenda única de amanhã por casa. Todas só sobre pendência VIVA
+// (`expired_at IS NULL`), cada uma no máximo uma vez (aria_reminders_sent).
+
+const SELECT_PENDENCIA = `
+  SELECT r.reservation_code, r.restaurant_id, d.name AS restaurant_name, d.city,
+         d.address_of_establishment AS address,
+         r.booking_date, r.reservation_time, r.people,
+         u.phone AS customer_phone, u.name AS customer_name,
+         (z.name IS NOT NULL) AS tz_valido,
+         COALESCE(z.name, 'UTC') AS tz_usado
+    FROM public.reservations r
+    JOIN public.db_restaurants d ON r.restaurant_id = d.restaurant_id
+    LEFT JOIN nextauth."User" u  ON r.customer_id = u.id
+    LEFT JOIN pg_timezone_names z ON z.name = btrim(d.timezone)
+    LEFT JOIN public.aria_reminders_sent s
+           ON s.reservation_code = r.reservation_code AND s.kind = $1
+   WHERE lower(btrim(r.booking_status)) = ANY($2::text[])
+     AND r.expired_at IS NULL
+     AND s.id IS NULL`;
+const HORA_LOCAL_DA_MESA = `((r.booking_date + COALESCE(r.reservation_time, '00:00'::time)) AT TIME ZONE COALESCE(z.name, 'UTC'))`;
+const CASA_MARCADA = `EXISTS (SELECT 1 FROM public.aria_contact_consent c
+                       WHERE c.restaurant_id = r.restaurant_id AND c.tipo = 'estabelecimento'
+                         AND c.whatsapp_reservas AND COALESCE(c.outbound_opted_out, false) = false)`;
+
+/**
+ * Pedido pendente há ≥ `minAgeHours`, com a mesa a ≥ `minHoursAhead`, ainda sem a marca `kind`.
+ * Para o cliente (`soCasasMarcadas=false`) exige telefone; para a casa, exige casa marcada.
+ */
+export async function getPendingForNudge(
+  kind: string,
+  minAgeHours: number,
+  minHoursAhead: number,
+  statuses: string[],
+  soCasasMarcadas = false,
+): Promise<ReminderRow[]> {
+  const { rows } = await pool.query(
+    `${SELECT_PENDENCIA}
+       AND r.created_date < NOW() - ($3 || ' hours')::interval
+       AND ${HORA_LOCAL_DA_MESA} > NOW() + ($4 || ' hours')::interval
+       AND ${soCasasMarcadas ? CASA_MARCADA : "u.phone IS NOT NULL"}
+     ORDER BY r.created_date ASC
+     LIMIT 100`,
+    [kind, statuses.map(normalizarStatus), String(minAgeHours), String(minHoursAhead)],
+  );
+  return rows;
+}
+
+/**
+ * Pedido pendente com a mesa a no máximo `hoursBefore` (e a pelo menos 1 h), com ≥ `minAgeHours`
+ * de vida: o encerramento honesto — "não conseguimos confirmar a tempo, não conte com ela".
+ */
+export async function getPendingForClose(
+  kind: string,
+  hoursBefore: number,
+  minAgeHours: number,
+  statuses: string[],
+): Promise<ReminderRow[]> {
+  const { rows } = await pool.query(
+    `${SELECT_PENDENCIA}
+       AND u.phone IS NOT NULL
+       AND r.created_date < NOW() - ($3 || ' hours')::interval
+       AND ${HORA_LOCAL_DA_MESA} BETWEEN NOW() + interval '1 hour' AND NOW() + ($4 || ' hours')::interval
+     ORDER BY r.booking_date ASC, r.reservation_time ASC NULLS LAST
+     LIMIT 100`,
+    [kind, statuses.map(normalizarStatus), String(minAgeHours), String(hoursBefore)],
+  );
+  return rows;
+}
+
+export type AgendaRow = {
+  restaurant_id: string;
+  restaurant_name: string | null;
+  city: string | null;
+  booking_date: string | Date;
+  reservation_code: string;
+  reservation_time: string | null;
+  people: number | null;
+  customer_name: string | null;
+};
+
+/** Código sintético da agenda de uma casa num dia — o mesmo que o SQL abaixo monta. */
+export function codigoAgenda(restaurantId: string, ymd: string): string {
+  return `AG${restaurantId}-${ymd.replace(/-/g, "")}`;
+}
+
+/**
+ * Mesas ACEITAS de amanhã (dia local da casa), nas casas marcadas, a partir de `localHour` da
+ * véspera. Uma agenda por casa e dia: a marca é o código sintético `AG<casa>-<AAAAMMDD>`.
+ * Só casas com fuso válido: sem fuso não se sabe quando é "amanhã".
+ */
+export async function getAgendaAmanhaCasas(localHour: number, statuses: string[]): Promise<AgendaRow[]> {
+  const { rows } = await pool.query(
+    `SELECT r.restaurant_id, d.name AS restaurant_name, d.city, r.booking_date, r.reservation_code,
+            r.reservation_time, r.people, u.name AS customer_name
+       FROM public.reservations r
+       JOIN public.db_restaurants d ON r.restaurant_id = d.restaurant_id
+       JOIN pg_timezone_names z ON z.name = btrim(d.timezone)
+       LEFT JOIN nextauth."User" u  ON r.customer_id = u.id
+      WHERE lower(btrim(r.booking_status)) = ANY($1::text[])
+        AND r.booking_date = (NOW() AT TIME ZONE z.name)::date + 1
+        AND EXTRACT(HOUR FROM (NOW() AT TIME ZONE z.name)) >= $2::int
+        AND ${CASA_MARCADA}
+        AND NOT EXISTS (SELECT 1 FROM public.aria_reminders_sent s
+                         WHERE s.kind = 'venue_agenda'
+                           AND s.reservation_code = 'AG' || r.restaurant_id || '-' || to_char(r.booking_date, 'YYYYMMDD'))
+      ORDER BY r.restaurant_id, r.reservation_time ASC NULLS LAST
+      LIMIT 500`,
+    [statuses.map(normalizarStatus), localHour],
   );
   return rows;
 }
