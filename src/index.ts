@@ -104,6 +104,22 @@ app.get("/health", (_req, res) => {
     promptHash: PROMPT_HASH,
     startedAt: SUBIU_EM,
     uptimeSeconds: Math.round(process.uptime()),
+    // v17: quais etapas de notificação este container ligou (só booleanos — sem nomes nem segredos).
+    // Variável adicionada sem redeploy fica invisível; aqui a dúvida acaba em uma chamada.
+    etapas: {
+      eventos: config.reservationEvents.enabled,
+      vigiaReservas: config.reservationEvents.enabled && config.reservationWatch.enabled,
+      lembrete2h: config.reminders.enabled && !!config.reminders.template,
+      vesperaCliente: config.briefing.enabled && !!config.briefing.template,
+      vesperaComMapa: config.briefing.enabled && !!config.briefing.templateMap,
+      avaliacao: config.review.enabled && !!config.review.template,
+      pendenteCliente24h: !!config.pendingNudge.template,
+      encerramentoHonesto: !!config.pendingClose.template,
+      pedidoNovoCasa: config.reservationEvents.enabled && !!config.reservationEvents.venueTemplates.pedido_recebido,
+      lembreteCasa24h: !!config.venueNudge.template,
+      vesperaCasa: config.venueBriefing.enabled && !!config.venueBriefing.template,
+      agendaCasa: !!config.venueAgenda.template,
+    },
   });
 });
 

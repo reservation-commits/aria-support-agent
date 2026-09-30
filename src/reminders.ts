@@ -78,11 +78,21 @@ async function enviarLote(p: {
   corpo: (r: ReminderRow, pais: string | null) => string[];
   /** Sufixo do botão de URL do template (v16: consulta do mapa). */
   botaoUrl?: (r: ReminderRow) => string | undefined;
+  /**
+   * v16: varreduras de janela ABERTA (pendência de 24 h+) reveriam a mesma reserva a cada tique e
+   * gravariam "sem_opt_in" 70 vezes por dia. Com esta opção, quem não pode receber (sem telefone,
+   * telefone inválido, sem opt-in, dado faltando) recebe a marca e sai da fila. Falha da Cloud API
+   * e fuso inválido continuam sem marca, para a próxima varredura tentar de novo.
+   */
+  marcarNaoEnviaveis?: boolean;
 }): Promise<void> {
   let enviados = 0;
   let falhas = 0;
   const semFuso: string[] = [];
   const nomeTemplate = (r: ReminderRow) => (typeof p.template === "function" ? p.template(r) : p.template);
+  const encerrar = async (r: ReminderRow, to = "") => {
+    if (p.marcarNaoEnviaveis) await markReminderSent(r.reservation_code, p.kind, to).catch(() => {});
+  };
 
   // Todo desfecho é registrado, inclusive o não-envio: é ele que diz, no
   // canário, se a trava está calibrada ou engolindo cliente legítimo.
@@ -99,6 +109,7 @@ async function enviarLote(p: {
   for (const r of p.rows) {
     if (!r.customer_phone) {
       await anotar("sem_telefone", r, { motivo: "cliente sem telefone cadastrado" });
+      await encerrar(r);
       continue;
     }
 
@@ -116,12 +127,14 @@ async function enviarLote(p: {
     const tel = avaliarTelefone(r.customer_phone);
     if (!podeReceberWhatsApp(tel)) {
       await anotar("telefone_nao_enviavel", r, { qualidadeTelefone: tel.qualidade, pais: tel.pais, motivo: tel.motivo });
+      await encerrar(r);
       continue;
     }
     const to = tel.e164;
     const consent = await podeReceberWhatsAppReservas(to); // opt-in (2026-09-25)
     if (!consent.ok) {
       await anotar(consent.motivo, r, { qualidadeTelefone: tel.qualidade, pais: tel.pais, motivo: DETALHE_CONSENTIMENTO[consent.motivo] });
+      await encerrar(r, to);
       continue;
     }
 
@@ -130,6 +143,7 @@ async function enviarLote(p: {
     if (bodyParams.some((x) => x.length === 0)) {
       // A Meta rejeita parâmetro vazio, e mensagem com dado faltando é pior que silêncio.
       await anotar("dados_insuficientes", r, { locale, qualidadeTelefone: tel.qualidade, pais: tel.pais, motivo: "parâmetro vazio (nome, casa, data, hora ou pessoas)" });
+      await encerrar(r, to);
       continue;
     }
     const ok = await sendTemplate({ to, template: nomeTemplate(r), locale, bodyParams, buttonUrlParam: p.botaoUrl?.(r) });
@@ -270,6 +284,7 @@ async function sweepPendingNudge(): Promise<void> {
     template: config.pendingNudge.template,
     evento: (locale) => `pending_nudge_${locale}`,
     corpo: corpoPendencia,
+    marcarNaoEnviaveis: true,
   });
 }
 
@@ -295,6 +310,7 @@ async function sweepPendingClose(): Promise<void> {
     template: config.pendingClose.template,
     evento: (locale) => `pending_close_${locale}`,
     corpo: corpoPendencia,
+    marcarNaoEnviaveis: true,
   });
 }
 

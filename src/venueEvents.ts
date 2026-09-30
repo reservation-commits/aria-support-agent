@@ -200,6 +200,16 @@ export async function notificarEstabelecimento(p: PayloadEvento, r: EventReserva
 
 const KIND_VENUE_BRIEFING = "venue_briefing";
 
+/**
+ * Quando a reserva pode ser marcada como tratada pela varredura. `falha_envio` NÃO é definitivo:
+ * em 30/09 os templates novos ainda estavam em revisão na Meta em alguns idiomas — marcar na
+ * falha queimaria o lembrete daquela casa para sempre. Sem marca, a próxima varredura tenta de
+ * novo (o dedup do envio é liberado na falha). Sem destinatário e teto também esperam.
+ */
+function desfechoDefinitivo(acao: ResultadoEstabelecimento["acao"]): boolean {
+  return acao === "enviado" || acao === "parcial" || acao === "dados_insuficientes";
+}
+
 export async function sweepVesperaEstabelecimento(): Promise<void> {
   const h = config.venueBriefing.hoursBefore;
   let rows: ReminderRow[] = [];
@@ -212,9 +222,9 @@ export async function sweepVesperaEstabelecimento(): Promise<void> {
   for (const r of rows) {
     if (r.tz_valido === false) continue; // sem fuso confiável não se lembra ninguém (mesma regra do cliente)
     const res = await enviarParaCasa({ evento: "vespera", template: config.venueBriefing.template, r, origem: "briefing" });
-    // Marca a reserva como tratada quando houve destinatário (enviado, parcial ou falha definitiva);
-    // sem destinatário marcado, não gasta a marca — a casa pode ser marcada até a véspera.
-    if (res.acao !== "sem_destinatario" && res.acao !== "teto_diario") {
+    // Marca a reserva como tratada só com desfecho definitivo; sem destinatário marcado, falha da
+    // Cloud API ou teto, não gasta a marca — a próxima varredura tenta de novo.
+    if (desfechoDefinitivo(res.acao)) {
       await markReminderSent(r.reservation_code, KIND_VENUE_BRIEFING, r.restaurant_id ?? "").catch(() => {});
     }
   }
@@ -240,7 +250,7 @@ export async function sweepLembretePedidoCasa(): Promise<void> {
   }
   for (const r of rows) {
     const res = await enviarParaCasa({ evento: "pedido_lembrete", template: config.venueNudge.template, r, origem: "reminder", botaoUrlParam: r.reservation_code });
-    if (res.acao !== "sem_destinatario" && res.acao !== "teto_diario") {
+    if (desfechoDefinitivo(res.acao)) {
       await markReminderSent(r.reservation_code, KIND_VENUE_NUDGE, r.restaurant_id ?? "").catch(() => {});
     }
   }
@@ -290,7 +300,7 @@ export async function sweepAgendaCasa(): Promise<void> {
         return params.every((x) => x.length > 0) ? params : null;
       },
     });
-    if (res.acao !== "sem_destinatario" && res.acao !== "teto_diario") {
+    if (desfechoDefinitivo(res.acao)) {
       agendas++;
       await markReminderSent(codigo, KIND_VENUE_AGENDA, restaurantId).catch(() => {});
       for (const m of mesas) await markReminderSent(m.reservation_code, KIND_VENUE_BRIEFING, restaurantId).catch(() => {});
