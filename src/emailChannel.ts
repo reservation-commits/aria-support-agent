@@ -25,6 +25,8 @@ import axios from "axios";
 import type Anthropic from "@anthropic-ai/sdk";
 import { config } from "./config.js";
 import { responderComRevisao } from "./entrega.js";
+import { identificarEstabelecimentoPorEmail } from "./venueIdentity.js";
+import { pareceNotificacaoDeReserva } from "./venueIdentityRegra.js";
 import { emailChatId, emailIdentity } from "./identity.js";
 import { getOrRestoreHistory, setHistory } from "./sessions.js";
 import { enqueueMessage, isBusy } from "./conversationQueue.js";
@@ -553,8 +555,12 @@ async function processEmailTurn(
   const seed = history.length === 0 ? [systemHint] : [];
   // Caminho único (entrega.ts): sanitiza, revisa (regras + leitura semântica), reescreve uma
   // vez se preciso e retém com registro e escalação se ainda reprovar. Fail-closed.
+  // v14: quem escreve é a CASA (e-mail de reservas do catálogo, ou resposta a uma notificação de reserva)?
+  // A revisão usa a régua de parceiro — em 30/09 a régua de cliente reteve uma carta correta ao Fratelli.
+  const casaPorEmail = await identificarEstabelecimentoPorEmail(ctx.to);
+  const destinatario = casaPorEmail || pareceNotificacaoDeReserva(ctx.subject) ? "estabelecimento" as const : "cliente" as const;
   const { reply, updatedHistory } = await responderComRevisao({
-    history, seed, userMsg, identity,
+    history, seed, userMsg, identity, destinatario,
     entrada: textFromBlocks(blocks), channel: "email", chatId, sender: ctx.to, subject: ctx.subject, sanitize: sanitizeEmailReply,
     emailCtx: { to: ctx.to, subject: ctx.subject, gmailMessageId: ctx.gmailMessageId, threadId: ctx.threadId, mailbox: ctx.mailbox, messageIdHeader: ctx.messageIdHeader, references: ctx.references },
   });

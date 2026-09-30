@@ -42,6 +42,23 @@ export async function pendentesDaCasa(restaurantId: string): Promise<PedidoPende
   }
 }
 
+/** O remetente de e-mail é a casa do catálogo (e-mail de reservas)? Devolve a casa ou null. */
+export async function identificarEstabelecimentoPorEmail(email: string): Promise<CasaIdentificada | null> {
+  try {
+    const { rows } = await pool.query<{ restaurant_id: string; nome: string | null; cidade: string | null }>(
+      `SELECT restaurant_id, name AS nome, city AS cidade FROM public.db_restaurants
+        WHERE email_for_reservations IS NOT NULL AND lower(email_for_reservations) = lower($1)
+        ORDER BY published DESC LIMIT 1`,
+      [email.trim()],
+    );
+    const r = rows[0];
+    return r ? { restaurantId: r.restaurant_id, nome: r.nome ?? "estabelecimento", cidade: r.cidade } : null;
+  } catch (err) {
+    console.warn("[venue] identificação por e-mail falhou:", err instanceof Error ? err.message : err);
+    return null;
+  }
+}
+
 /** Texto do aviso de sistema para o turno, ou null se o número não é de estabelecimento. */
 export async function avisoSeEstabelecimento(phoneE164: string): Promise<string | null> {
   const casa = await identificarEstabelecimento(phoneE164);

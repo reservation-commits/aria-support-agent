@@ -18,7 +18,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { config } from "./config.js";
 import { logEscalation, pool } from "./db.js";
 
-import { RUBRICA, NOTA_MINIMA, PROMPT_JUIZ, interpretarVeredito, resumirVereditos } from "./juizRegua.js";
+import { RUBRICA, NOTA_MINIMA, PROMPT_JUIZ, interpretarVeredito, resumirVereditos, promptPara, type Destinatario } from "./juizRegua.js";
 import type { Criterio, Veredito, ResumoJulgamento } from "./juizRegua.js";
 export { RUBRICA, NOTA_MINIMA, interpretarVeredito, resumirVereditos };
 export type { Criterio, Veredito, ResumoJulgamento };
@@ -31,6 +31,7 @@ interface Par {
   channel: "email" | "whatsapp";
   pergunta: string | null;
   resposta: string;
+  destinatario: Destinatario;
 }
 
 const MAX_POR_RODADA = 40;
@@ -38,8 +39,10 @@ const MAX_CHARS = 1200;
 
 /** Respostas enviadas nas últimas 24 h que ainda não foram julgadas, com a mensagem do cliente que as motivou. */
 async function coletarPares(): Promise<Par[]> {
-  const { rows } = await pool.query<{ id: string; chat_id: string; pergunta: string | null; resposta: string }>(
+  const { rows } = await pool.query<{ id: string; chat_id: string; pergunta: string | null; resposta: string; casa: boolean }>(
     `SELECT o.id::text AS id, o.chat_id, o.content AS resposta,
+            (EXISTS (SELECT 1 FROM public.db_restaurants d WHERE o.chat_id LIKE 'email:%' AND d.email_for_reservations IS NOT NULL AND lower(d.email_for_reservations) = lower(replace(o.chat_id, 'email:', '')))
+             OR EXISTS (SELECT 1 FROM public.aria_contact_consent c WHERE c.tipo = 'estabelecimento' AND c.phone = o.chat_id)) AS casa,
             (SELECT i.content FROM public.aria_messages i
               WHERE i.chat_id = o.chat_id AND i.direction = 'inbound' AND i.created_at < o.created_at
               ORDER BY i.created_at DESC LIMIT 1) AS pergunta
@@ -58,20 +61,34 @@ async function coletarPares(): Promise<Par[]> {
     channel: r.chat_id.startsWith("email:") ? "email" : "whatsapp",
     pergunta: r.pergunta ? r.pergunta.slice(0, MAX_CHARS) : null,
     resposta: r.resposta.slice(0, MAX_CHARS),
+    destinatario: r.casa ? "estabelecimento" : "cliente",
   }));
 }
 
 // ─── Julgamento ───────────────────────────────────────────────────────────────
 
-const SYSTEM = PROMPT_JUIZ;
+const SYSTEM = PROMPT_JUIZ; // régua de cliente; a de estabelecimento vem de promptPara()
 
 async function julgar(pares: Par[]): Promise<{ vereditos: Veredito[]; model: string }> {
   const model = config.cost.fallbackModel;
+  const grupos: Destinatario[] = ["cliente", "estabelecimento"];
+  const todos: Veredito[] = [];
+  for (const g of grupos) {
+    const lote = pares.filter((p) => p.destinatario === g);
+    if (lote.length === 0) continue;
+    const { vereditos } = await julgarLote(lote, promptPara(g), model);
+    todos.push(...vereditos);
+  }
+  return { vereditos: todos, model };
+}
+
+async function julgarLote(pares: Par[], system: string, model: string): Promise<{ vereditos: Veredito[] }> {
+  void SYSTEM;
   const client = new Anthropic({ apiKey: config.anthropic.apiKey, timeout: 60_000, maxRetries: 1 });
   const res = await client.messages.create({
     model,
     max_tokens: 4000,
-    system: SYSTEM,
+    system,
     messages: [{ role: "user", content: JSON.stringify(pares.map(({ id, pergunta, resposta }) => ({ id, pergunta, resposta }))) }],
   });
   const texto = res.content
@@ -79,7 +96,7 @@ async function julgar(pares: Par[]): Promise<{ vereditos: Veredito[]; model: str
     .map((b) => b.text)
     .join("")
     .trim();
-  return { vereditos: interpretarVeredito(texto, pares.map((p) => p.id)), model };
+  return { vereditos: interpretarVeredito(texto, pares.map((p) => p.id)) };
 }
 
 async function gravar(vereditos: Veredito[], pares: Par[], model: string): Promise<void> {

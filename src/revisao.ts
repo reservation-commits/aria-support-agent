@@ -20,7 +20,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { config } from "./config.js";
 import { logEscalation, pool } from "./db.js";
 import { outboundGate } from "./format.js";
-import { PROMPT_JUIZ, interpretarVeredito, type Criterio } from "./juizRegua.js";
+import { interpretarVeredito, promptPara, type Criterio, type Destinatario } from "./juizRegua.js";
 
 export type Revisao =
   | { ok: true; semRevisor?: boolean; avisos?: string[] }
@@ -38,12 +38,12 @@ const NOME: Record<Criterio, string> = {
 
 let ultimoAvisoRevisor = 0;
 
-async function revisorSemantico(entrada: string, resposta: string, compromisso: string | null): Promise<{ reprovados: Criterio[]; avisos: Criterio[]; motivo: string }> {
+async function revisorSemantico(entrada: string, resposta: string, compromisso: string | null, destinatario: Destinatario): Promise<{ reprovados: Criterio[]; avisos: Criterio[]; motivo: string }> {
   const client = new Anthropic({ apiKey: config.anthropic.apiKey, timeout: 25_000, maxRetries: 1 });
   const res = await client.messages.create({
     model: config.cost.fallbackModel,
     max_tokens: 400,
-    system: PROMPT_JUIZ,
+    system: promptPara(destinatario),
     messages: [{ role: "user", content: JSON.stringify([{ id: 1, pergunta: entrada.slice(0, 1500), resposta: resposta.slice(0, 2500), ...(compromisso ? { compromisso_registrado: compromisso } : {}) }]) }],
   });
   const texto = res.content.filter((b): b is Anthropic.TextBlock => b.type === "text").map((b) => b.text).join("").trim();
@@ -76,8 +76,11 @@ export async function revisarResposta(p: {
   tentativa: number;
   /** Data do compromisso registrado neste turno (AAAA-MM-DD) — libera a data NOSSA na carta. */
   compromisso?: string | null;
+  /** Quem recebe a carta. Estabelecimento: régua de parceiro; prazos operacionais permitidos. */
+  destinatario?: Destinatario;
 }): Promise<Revisao> {
-  const portao = outboundGate(p.resposta, p.entrada, { prazoPermitido: !!p.compromisso });
+  const destinatario: Destinatario = p.destinatario ?? "cliente";
+  const portao = outboundGate(p.resposta, p.entrada, { prazoPermitido: !!p.compromisso || destinatario === "estabelecimento" });
   if (!portao.ok) {
     await registrar({ chatId: p.chatId, channel: p.channel, tentativa: p.tentativa, aprovado: false, origem: "regra", motivos: [portao.motivo], snippet: p.resposta });
     return { ok: false, origem: "regra", motivos: [portao.motivo] };
@@ -88,7 +91,7 @@ export async function revisarResposta(p: {
   }
 
   try {
-    const r = await revisorSemantico(p.entrada, p.resposta, p.compromisso ?? null);
+    const r = await revisorSemantico(p.entrada, p.resposta, p.compromisso ?? null, destinatario);
     if (r.reprovados.length) {
       const motivos = [...r.reprovados.map((c) => NOME[c]), ...(r.motivo ? [r.motivo] : [])];
       await registrar({ chatId: p.chatId, channel: p.channel, tentativa: p.tentativa, aprovado: false, origem: "juiz", motivos, snippet: p.resposta });

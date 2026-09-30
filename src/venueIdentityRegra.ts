@@ -44,3 +44,9 @@ export function montarAvisoEstabelecimento(casa: CasaIdentificada, pendentes: Pe
     "para ela confirmar com um toque; se citar um código, use o link daquele código. Responda no idioma em que a casa escreveu.]"
   );
 }
+
+/** Assunto típico das notificações que a plataforma manda à casa (a casa responde "em cima" delas). */
+export function pareceNotificacaoDeReserva(assunto: string | null | undefined): boolean {
+  const s = (assunto ?? "").toLowerCase();
+  return /(new booking|nova reserva|pending request|reservation (refused|accepted|declined|cancel|request)|booking (accepted|declined|request|canceled|cancelled)|nouvelle r[ée]servation|nueva reserva|nuova prenotazione)/.test(s);
+}

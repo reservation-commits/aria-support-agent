@@ -524,7 +524,7 @@ async function processTurn(
   let turno: Awaited<ReturnType<typeof responderComRevisao>>;
   try {
     turno = await responderComRevisao({
-      history, seed, userMsg, identity,
+      history, seed, userMsg, identity, destinatario: avisoCasa ? "estabelecimento" : "cliente",
       entrada: textFromBlocks(blocks), channel: "whatsapp", chatId, sender: chatId, sanitize: sanitizeReply,
     });
   } catch (err) {

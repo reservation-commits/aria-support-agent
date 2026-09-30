@@ -14,6 +14,7 @@ import type { AgentIdentity } from "./identity.js";
 import { logEscalation } from "./db.js";
 import { logScopeBlock } from "./dashboard/logger.js";
 import { revisarResposta } from "./revisao.js";
+import type { Destinatario } from "./juizRegua.js";
 import { anexarContextoEmail, compromissoDesteTurno, type ContextoEmail } from "./compromissosDb.js";
 
 export type ResultadoEntrega = {
@@ -23,7 +24,21 @@ export type ResultadoEntrega = {
   reescrita?: boolean;
 };
 
-function pedidoDeReescrita(motivos: string[], compromisso: string | null): Anthropic.MessageParam {
+function pedidoDeReescrita(motivos: string[], compromisso: string | null, destinatario: Destinatario = "cliente"): Anthropic.MessageParam {
+  if (destinatario === "estabelecimento") {
+    return {
+      role: "user",
+      content: [{
+        type: "text",
+        text:
+          "[Sistema: revisão interna antes do envio — a sua resposta anterior ao ESTABELECIMENTO não foi enviada. " +
+          `Motivos: ${motivos.join("; ")}. ` +
+          "Reescreva a carta à casa corrigindo isso: sem nomes de ferramenta ou sistema; sem telefone ou e-mail do cliente; " +
+          "diga o estado da reserva, o que acontece com o cliente agora e como a casa age (o link do pedido); no idioma em que a casa escreveu. " +
+          "Responda SÓ com a carta final.]",
+      }],
+    };
+  }
   return {
     role: "user",
     content: [
@@ -56,7 +71,10 @@ export async function responderComRevisao(p: {
   sanitize: (s: string) => string;
   /** E-mail: contexto de thread, guardado no compromisso para a Aria voltar na mesma conversa. */
   emailCtx?: ContextoEmail;
+  /** cliente (padrão) ou estabelecimento — muda a régua da revisão e a instrução de reescrita. */
+  destinatario?: Destinatario;
 }): Promise<ResultadoEntrega> {
+  const destinatario: Destinatario = p.destinatario ?? "cliente";
   const primeiro = await runAgent([...p.history, ...p.seed], p.userMsg, p.identity);
   let historico = primeiro.updatedHistory;
   let clean = p.sanitize(primeiro.reply);
@@ -65,17 +83,17 @@ export async function responderComRevisao(p: {
   // Compromisso registrado neste turno (tool registrar_compromisso) libera a data NOSSA na carta.
   const comp = await compromissoDesteTurno(p.chatId);
   if (comp && p.emailCtx) await anexarContextoEmail(p.chatId, p.emailCtx).catch(() => {});
-  const rev1 = await revisarResposta({ resposta: clean, entrada: p.entrada, channel: p.channel, chatId: p.chatId, tentativa: 1, compromisso: comp?.due ?? null });
+  const rev1 = await revisarResposta({ resposta: clean, entrada: p.entrada, channel: p.channel, chatId: p.chatId, tentativa: 1, compromisso: comp?.due ?? null, destinatario });
   if (rev1.ok) return { reply: clean, updatedHistory: historico };
 
   console.warn(`[entrega] ${p.channel} ${p.chatId}: reprovada (${rev1.origem}) — ${rev1.motivos.join("; ")} → reescrevendo`);
-  const segundo = await runAgent(historico, pedidoDeReescrita(rev1.motivos, comp?.due ?? null), p.identity);
+  const segundo = await runAgent(historico, pedidoDeReescrita(rev1.motivos, comp?.due ?? null, destinatario), p.identity);
   const comp2 = comp ?? (await compromissoDesteTurno(p.chatId));
   if (comp2 && !comp && p.emailCtx) await anexarContextoEmail(p.chatId, p.emailCtx).catch(() => {});
   historico = segundo.updatedHistory;
   clean = p.sanitize(segundo.reply);
   if (clean) {
-    const rev2 = await revisarResposta({ resposta: clean, entrada: p.entrada, channel: p.channel, chatId: p.chatId, tentativa: 2, compromisso: comp2?.due ?? null });
+    const rev2 = await revisarResposta({ resposta: clean, entrada: p.entrada, channel: p.channel, chatId: p.chatId, tentativa: 2, compromisso: comp2?.due ?? null, destinatario });
     if (rev2.ok) return { reply: clean, updatedHistory: historico, reescrita: true };
     rev1.motivos.push(...rev2.motivos.map((m) => `2ª: ${m}`));
   } else {
@@ -96,7 +114,7 @@ export async function responderComRevisao(p: {
   }).catch(() => {});
   await logEscalation({
     tag: "ALTA",
-    summary: `[revisao] resposta ao cliente RETIDA no canal ${p.channel} após reescrita — ${motivos.slice(0, 3).join("; ").slice(0, 200)}. O cliente NÃO recebeu resposta: responder pelo painel.`,
+    summary: `[revisao] resposta ${destinatario === "estabelecimento" ? "ao ESTABELECIMENTO" : "ao cliente"} RETIDA no canal ${p.channel} após reescrita — ${motivos.slice(0, 3).join("; ").slice(0, 200)}. O cliente NÃO recebeu resposta: responder pelo painel.`,
     phone: p.channel === "whatsapp" ? p.chatId : "",
   }).catch(() => {});
   return { reply: null, updatedHistory: historico, retida: { motivos, tentativas: 2 } };
