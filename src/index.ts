@@ -36,6 +36,7 @@ import { verificarSegredoWebhook, STATUS_DE } from "./webhookAuth.js";
 import { notificarEstabelecimento, startVenueReminders, type ResultadoEstabelecimento } from "./venueEvents.js";
 import { startCompromissos } from "./compromissos.js";
 import { startReservationWatch } from "./watcher.js";
+import { avisoSeEstabelecimento } from "./venueIdentity.js";
 import { parsePayloadEvento } from "./eventFormat.js";
 import { avaliarTelefone, podeReceberWhatsApp } from "./phoneQuality.js";
 import { normalizarIdioma, IDIOMAS_ACEITOS } from "./templateLocale.js";
@@ -462,11 +463,15 @@ async function processTurn(
   }
 
   const startedAt = Date.now();
+  // v13: se o número é de um ESTABELECIMENTO marcado (recebe pedidos no WhatsApp), o turno
+  // ganha o aviso de sistema com o papel de parceiro e os links de resposta dos pedidos.
+  const avisoCasa = await avisoSeEstabelecimento(whatsappIdentity(chatId).phone!);
+  const blocosDoTurno = avisoCasa ? ([{ type: "text", text: avisoCasa }, ...blocks] as AriaContentBlock[]) : blocks;
   // Cast no limite: AriaContentBlock inclui bloco de documento (PDF) que o SDK
   // 0.30 ainda não tipa, mas a API /v1/messages serializa e aceita normalmente.
   const userMsg = {
     role: "user" as const,
-    content: blocks as unknown as Anthropic.MessageParam["content"],
+    content: blocosDoTurno as unknown as Anthropic.MessageParam["content"],
   };
 
   // Identidade confiável do servidor: telefone E.164 do WhatsApp.
