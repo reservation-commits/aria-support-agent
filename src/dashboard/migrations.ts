@@ -539,6 +539,16 @@ export async function runDashboardMigrations(): Promise<void> {
         ON public.aria_commitments (status, due_at);
     `);
 
+    // Foto das reservas para o vigia (watcher.ts): último status visto por código.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS public.aria_reservation_watch (
+        reservation_code TEXT PRIMARY KEY,
+        status           TEXT NOT NULL,
+        first_seen       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        last_change      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+
     // Semeia o histórico do ledger (idempotente; ON CONFLICT DO NOTHING).
     try {
       const { seedCampaignSends } = await import("./campaign.js");

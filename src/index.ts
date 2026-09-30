@@ -35,6 +35,7 @@ import { tratarEventoReserva } from "./reservationEvents.js";
 import { verificarSegredoWebhook, STATUS_DE } from "./webhookAuth.js";
 import { notificarEstabelecimento, startVenueReminders, type ResultadoEstabelecimento } from "./venueEvents.js";
 import { startCompromissos } from "./compromissos.js";
+import { startReservationWatch } from "./watcher.js";
 import { parsePayloadEvento } from "./eventFormat.js";
 import { avaliarTelefone, podeReceberWhatsApp } from "./phoneQuality.js";
 import { normalizarIdioma, IDIOMAS_ACEITOS } from "./templateLocale.js";
@@ -648,6 +649,7 @@ app.listen(config.port, async () => {
       startReminders();
       startVenueReminders();
       startCompromissos();
+      startReservationWatch();
       startEmailChannel();
       startDedupCleanup();
       startEmbeddingsSync();
@@ -666,6 +668,7 @@ app.listen(config.port, async () => {
       startReminders();
       startVenueReminders();
       startCompromissos();
+      startReservationWatch();
       startEmailChannel();
       startDedupCleanup();
       startEmbeddingsSync();

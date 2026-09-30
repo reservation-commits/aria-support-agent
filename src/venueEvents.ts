@@ -54,8 +54,19 @@ export type ResultadoEstabelecimento = {
 
 type Destinatario = { phone: string; idioma: string | null };
 
-/** Números da casa marcados para receber (máx. 3), já em E.164 e sem opt-out. */
+/**
+ * Números da casa marcados para receber (máx. 3), já em E.164 e sem opt-out.
+ * Registro de Opt-out de Listagem (constituição): casa com pedido de remoção não recebe NADA;
+ * registro ilegível = nenhum contato (fail-closed).
+ */
 export async function getVenueRecipients(restaurantId: string): Promise<Destinatario[]> {
+  try {
+    const optout = await pool.query(`SELECT 1 FROM public.v_listing_consent_atual WHERE restaurant_id = $1 LIMIT 1`, [restaurantId]);
+    if ((optout.rowCount ?? 0) > 0) return [];
+  } catch (err) {
+    console.warn("[evento-estabelecimento] registro de opt-out ilegível — nenhum contato:", err instanceof Error ? err.message : err);
+    return [];
+  }
   const { rows } = await pool.query<Destinatario>(
     `SELECT phone, idioma FROM public.aria_contact_consent
       WHERE tipo = 'estabelecimento' AND restaurant_id = $1
@@ -103,10 +114,14 @@ async function enviarParaCasa(p: {
   let falhas = 0;
   for (const d of destinatarios) {
     const tel = avaliarTelefone(d.phone);
-    if (!podeReceberWhatsApp(tel)) {
+    // Casa marcada de propósito: aceita também linha fixa (muitos restaurantes têm WhatsApp Business no fixo).
+    // Número inválido ou ambíguo continua barrado; se o fixo não tiver WhatsApp, a Meta recusa e fica registrado.
+    const fixoMarcado = tel.qualidade === "ENVIAVEL_NAO_MOVEL" && !!tel.e164;
+    if (!podeReceberWhatsApp(tel) && !fixoMarcado) {
       await anotar("telefone_nao_enviavel", { qualidadeTelefone: tel.qualidade, pais: tel.pais, motivo: tel.motivo });
       continue;
     }
+    const numero = tel.e164 as string;
     const params = montarParametrosEstabelecimento(p.r, tel.pais);
     if (!params) {
       await anotar("dados_insuficientes", { pais: tel.pais, motivo: "faltam campos (casa, data, hora, pessoas ou nome do cliente)" });
@@ -127,13 +142,13 @@ async function enviarParaCasa(p: {
       return { acao: "teto_diario", detalhe: `${hoje}/${config.reservationEvents.dailyCap} hoje` };
     }
 
-    const marca = `evt_${p.evento}_venue:${tel.e164}`;
-    if (!(await reservarEnvio(code, marca, tel.e164))) {
+    const marca = `evt_${p.evento}_venue:${numero}`;
+    if (!(await reservarEnvio(code, marca, numero))) {
       await anotar("duplicado", { pais: tel.pais, motivo: "já enviado a este número" });
       continue;
     }
-    const locale = escolherLocale({ idiomaPreferido: d.idioma, phone: tel.e164, aprovados: config.reminders.locales, defaultLocale: config.reminders.defaultLocale }).locale;
-    const ok = await sendTemplate({ to: tel.e164, template: p.template, locale, bodyParams: params, buttonUrlParam: p.botaoUrlParam });
+    const locale = escolherLocale({ idiomaPreferido: d.idioma, phone: numero, aprovados: config.reminders.locales, defaultLocale: config.reminders.defaultLocale }).locale;
+    const ok = await sendTemplate({ to: numero, template: p.template, locale, bodyParams: params, buttonUrlParam: p.botaoUrlParam });
     if (!ok) {
       falhas++;
       await liberarEnvio(code, marca).catch(() => {});
@@ -142,7 +157,7 @@ async function enviarParaCasa(p: {
     }
     enviados++;
     await anotar("enviado", { locale, pais: tel.pais, qualidadeTelefone: tel.qualidade });
-    publish({ kind: "tool_call", chat: tel.e164, tool: `venue_${p.evento}_${locale}`, success: true, latency_ms: 0, at: new Date().toISOString() });
+    publish({ kind: "tool_call", chat: numero, tool: `venue_${p.evento}_${locale}`, success: true, latency_ms: 0, at: new Date().toISOString() });
     console.log(`[evento-estabelecimento] ${p.evento} enviado · reserva ${code} · ${tel.pais} · ${locale}`);
   }
 

@@ -164,6 +164,13 @@ export const config = {
     } as Record<string, string>,
   },
 
+  reservationWatch: {
+    // Vigia de reservas (watcher.ts): a Aria lê a tabela e dispara os eventos sozinha —
+    // sem depender do n8n. Só age com RESERVATION_EVENTS_ENABLED=true.
+    enabled: (process.env.RESERVATION_WATCH_ENABLED ?? "true").toLowerCase() !== "false",
+    intervalMinutes: Number(process.env.RESERVATION_WATCH_MINUTES ?? 2),
+  },
+
   revisao: {
     // Revisão semântica ANTES do envio (revisao.ts). Ligada por padrão; desligar só em
     // emergência — as regras da porta continuam valendo mesmo com isto off.
