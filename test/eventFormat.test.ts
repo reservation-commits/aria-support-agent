@@ -21,9 +21,21 @@ test("data nunca sai ambígua entre dia e mês", () => {
 });
 
 test("data respeita o idioma do cliente", () => {
-  assert.match(formatarData("2026-04-03", "US"), /Apr/);
-  assert.match(formatarData("2026-04-03", "FR"), /avr/i);
-  assert.match(formatarData("2026-04-03", "BR"), /abr/i);
+  assert.match(formatarData("2026-04-03", "US"), /April/);
+  assert.match(formatarData("2026-04-03", "FR"), /avril/i);
+  assert.match(formatarData("2026-04-03", "BR"), /abril/i);
+});
+
+test("data completa, com dia da semana e inicial maiúscula (templates v2, 30/09)", () => {
+  // 3 de outubro de 2026 é um sábado.
+  assert.equal(formatarData("2026-10-03", "BR"), "Sábado, 3 de outubro de 2026");
+  assert.equal(formatarData("2026-10-03", "US"), "Saturday, October 3, 2026");
+  assert.equal(formatarData("2026-10-03", "FR"), "Samedi 3 octobre 2026");
+  assert.equal(formatarData("2026-10-03", "IT"), "Sabato 3 ottobre 2026");
+  assert.equal(formatarData("2026-10-03", "DE"), "Samstag, 3. Oktober 2026");
+  assert.equal(formatarData("2026-10-03", "ES"), "Sábado, 3 de octubre de 2026");
+  // Sem quebra de linha nem tabulação: a Meta recusa parâmetro com isso.
+  assert.doesNotMatch(formatarData("2026-10-03", "GB"), /[\n\t]/);
 });
 
 test("toYMD não desliza um dia com o Date que o pg devolve", () => {

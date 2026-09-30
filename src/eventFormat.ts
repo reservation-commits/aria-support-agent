@@ -8,8 +8,13 @@
  * britânica (GB 1.713). Para um americano, "03/04" é 4 de março; para um
  * francês, 3 de abril. Numa notificação cuja única função é dizer QUANDO é a
  * mesa, essa ambiguidade é inaceitável. Por isso a data sai sempre com o mês
- * por extenso abreviado, no idioma do cliente: "3 Apr 2026", "3 avr. 2026",
- * "3 de abr. de 2026". Não há leitura dupla possível.
+ * por extenso, no idioma do cliente. Não há leitura dupla possível.
+ *
+ * Desde a v15 (2026-09-30) a data vai COMPLETA, com dia da semana e mês por
+ * extenso — "Sábado, 3 de outubro de 2026", "Saturday, October 3, 2026",
+ * "samedi 3 octobre 2026" — porque os templates v2 mostram os dados em ficha
+ * ("*Data:* …"), e o fundador pediu uma mensagem impecável: "3 de out. de 2026"
+ * parecia rascunho. O dia da semana ajuda a casa a conferir a agenda.
  *
  * A hora segue a convenção do país: 12h com AM/PM onde é o costume, 24h no
  * resto. Um americano lendo "20:00" hesita; "8:00 PM" ele não lê errado.
@@ -59,16 +64,21 @@ export function toYMD(v: string | Date | null | undefined): string | null {
   return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
 }
 
-/** "2026-04-03" + país → "3 Apr 2026" / "3 avr. 2026". Vazio se não der. */
+/**
+ * "2026-10-03" + país → "Sábado, 3 de outubro de 2026" / "Saturday, October 3, 2026".
+ * Primeira letra sempre maiúscula (pt/fr/es/it escrevem o dia da semana em
+ * minúscula, mas a linha "*Data:* sábado…" ficaria torta). Vazio se não der.
+ */
 export function formatarData(v: string | Date | null | undefined, pais: string | null): string {
   const ymd = toYMD(v);
   if (!ymd) return "";
   const [a, m, d] = ymd.split("-").map(Number);
   const dt = new Date(Date.UTC(a, m - 1, d));
   try {
-    return new Intl.DateTimeFormat(intlLocaleForCountry(pais), {
-      day: "numeric", month: "short", year: "numeric", timeZone: "UTC",
+    const s = new Intl.DateTimeFormat(intlLocaleForCountry(pais), {
+      weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: "UTC",
     }).format(dt);
+    return s.charAt(0).toLocaleUpperCase() + s.slice(1);
   } catch {
     return ymd;
   }
