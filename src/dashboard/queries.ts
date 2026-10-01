@@ -475,6 +475,14 @@ export async function countOptedOut(): Promise<number> {
   return rows[0]?.n ?? 0;
 }
 
+/** v19: números na lista de bloqueio por indisponibilidade (a Meta devolveu "undeliverable"). */
+export async function countIndisponiveis(): Promise<number> {
+  const { rows } = await pool.query(
+    `SELECT COUNT(*)::int AS n FROM public.aria_contact_consent WHERE whatsapp_indisponivel = true`,
+  );
+  return rows[0]?.n ?? 0;
+}
+
 // Mensagens ignoradas por estarem fora de escopo (newsletter/marketing/relatório).
 export async function listScopeBlocks(limit = 100) {
   const { rows } = await pool.query(

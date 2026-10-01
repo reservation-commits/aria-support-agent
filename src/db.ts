@@ -844,7 +844,7 @@ export async function setOutboundConsent(
 /** Linha de consentimento do número (E.164), ou null se nunca foi marcado. */
 export async function getConsentRow(phone: string): Promise<LinhaConsentimento | null> {
   const { rows } = await pool.query<LinhaConsentimento>(
-    `SELECT whatsapp_reservas, outbound_opted_out, tipo, idioma FROM public.aria_contact_consent WHERE phone = $1`,
+    `SELECT whatsapp_reservas, outbound_opted_out, whatsapp_indisponivel, tipo, idioma FROM public.aria_contact_consent WHERE phone = $1`,
     [phone],
   );
   return rows[0] ?? null;
@@ -888,6 +888,31 @@ export async function isOptedOut(phone: string): Promise<boolean> {
     [phone],
   );
   return rows.length > 0;
+}
+
+/**
+ * v19: lista de bloqueio por indisponibilidade. Só marca número que JÁ tem linha de consentimento
+ * (quem não tem linha já não recebe). Devolve quantas linhas mudaram: 0 = nada a bloquear.
+ */
+export async function marcarWhatsAppIndisponivel(phone: string, motivo: string): Promise<number> {
+  const r = await pool.query(
+    `UPDATE public.aria_contact_consent
+        SET whatsapp_indisponivel = true, indisponivel_motivo = $2, indisponivel_em = NOW(), updated_at = NOW()
+      WHERE phone = $1 AND whatsapp_indisponivel = false`,
+    [phone, motivo],
+  );
+  return r.rowCount ?? 0;
+}
+
+/** v19: o número nos escreveu — tem WhatsApp. Sai da lista de bloqueio por indisponibilidade (o PARAR fica). */
+export async function limparWhatsAppIndisponivel(phone: string): Promise<number> {
+  const r = await pool.query(
+    `UPDATE public.aria_contact_consent
+        SET whatsapp_indisponivel = false, indisponivel_motivo = NULL, indisponivel_em = NULL, updated_at = NOW()
+      WHERE phone = $1 AND whatsapp_indisponivel = true`,
+    [phone],
+  );
+  return r.rowCount ?? 0;
 }
 
 // ─── Lembretes proativos (outbound) ──────────────────────────────────────────
@@ -1169,7 +1194,8 @@ const SELECT_PENDENCIA = `
 const HORA_LOCAL_DA_MESA = `((r.booking_date + COALESCE(r.reservation_time, '00:00'::time)) AT TIME ZONE COALESCE(z.name, 'UTC'))`;
 const CASA_MARCADA = `EXISTS (SELECT 1 FROM public.aria_contact_consent c
                        WHERE c.restaurant_id = r.restaurant_id AND c.tipo = 'estabelecimento'
-                         AND c.whatsapp_reservas AND COALESCE(c.outbound_opted_out, false) = false)`;
+                         AND c.whatsapp_reservas AND COALESCE(c.outbound_opted_out, false) = false
+                         AND COALESCE(c.whatsapp_indisponivel, false) = false)`;
 
 /**
  * Pedido pendente há ≥ `minAgeHours`, com a mesa a ≥ `minHoursAhead`, ainda sem a marca `kind`.

@@ -61,6 +61,8 @@ export type AcaoEvento =
   | "telefone_nao_enviavel"
   | "opt_out"
   | "sem_opt_in"
+  /** v19: número na lista de bloqueio por indisponibilidade (a Meta devolveu "undeliverable"). */
+  | "indisponivel"
   | "dados_insuficientes"
   | "teto_diario"
   | "falha_envio";

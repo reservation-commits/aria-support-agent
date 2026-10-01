@@ -215,6 +215,16 @@ export async function runDashboardMigrations(): Promise<void> {
       CREATE INDEX IF NOT EXISTS aria_contact_consent_optin_idx
         ON public.aria_contact_consent (whatsapp_reservas) WHERE whatsapp_reservas;
     `);
+    // v19 (decisão do fundador, 2026-10-01): lista de bloqueio. Número que a Meta devolve como
+    // "undeliverable" (sem conta de WhatsApp) fica marcado e não recebe mais nada até alguém
+    // corrigir — ou até o próprio número nos escrever (prova viva de que tem WhatsApp).
+    // O "PARAR" continua em outbound_opted_out; as duas colunas formam a lista de bloqueio.
+    await client.query(`
+      ALTER TABLE public.aria_contact_consent
+        ADD COLUMN IF NOT EXISTS whatsapp_indisponivel BOOLEAN NOT NULL DEFAULT false,
+        ADD COLUMN IF NOT EXISTS indisponivel_motivo   TEXT,
+        ADD COLUMN IF NOT EXISTS indisponivel_em       TIMESTAMPTZ;
+    `);
 
     // Avaliações de experiência (pós-visita). Guardadas até serem publicadas
     // na página do estabelecimento na plataforma (posted_to_platform).

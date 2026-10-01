@@ -268,6 +268,8 @@ export type DeliveryStatus = {
   status: string; // sent | delivered | read | failed
   recipient: string | null;
   errorTitle: string | null;
+  /** v19: código da Meta (131026 = undeliverable: o número não tem WhatsApp). */
+  errorCode: number | null;
 };
 
 /**
@@ -283,13 +285,16 @@ export function extractStatuses(payload: WhatsAppWebhookPayload): DeliveryStatus
       id?: string;
       status?: string;
       recipient_id?: string;
-      errors?: Array<{ title?: string }>;
+      errors?: Array<{ title?: string; code?: number | string }>;
     };
+    const codeBruto = st.errors?.[0]?.code;
+    const errorCode = codeBruto === undefined || codeBruto === null || codeBruto === "" ? null : Number(codeBruto);
     return {
       id: st.id ?? "",
       status: st.status ?? "unknown",
       recipient: st.recipient_id ?? null,
       errorTitle: st.errors?.[0]?.title ?? null,
+      errorCode: Number.isFinite(errorCode as number) ? errorCode : null,
     };
   });
 }

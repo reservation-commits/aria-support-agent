@@ -79,6 +79,7 @@ export async function getVenueRecipients(restaurantId: string): Promise<Destinat
     `SELECT phone, idioma FROM public.aria_contact_consent
       WHERE tipo = 'estabelecimento' AND restaurant_id = $1
         AND whatsapp_reservas = true AND outbound_opted_out = false
+        AND COALESCE(whatsapp_indisponivel, false) = false
       ORDER BY updated_at DESC LIMIT 3`,
     [restaurantId],
   );

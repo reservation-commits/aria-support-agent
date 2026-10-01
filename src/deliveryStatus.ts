@@ -31,6 +31,20 @@ export function avancaStatus(atual: string | null | undefined, novo: string): bo
   return n > a;
 }
 
+/**
+ * v19: quando um status de falha significa "este número não tem WhatsApp" e deve entrar na
+ * lista de bloqueio. Só o 131026 ("Message undeliverable") diz isso. Outras falhas — janela de
+ * 24 h, limite de marketing, template reprovado, experimento da Meta — são do envio, não do número.
+ */
+export const META_UNDELIVERABLE = 131026;
+
+export function motivoBloqueio(s: { status: string; errorCode?: number | null; errorTitle?: string | null }): string | null {
+  if (s.status !== "failed") return null;
+  if (s.errorCode === META_UNDELIVERABLE) return "meta:undeliverable";
+  if (s.errorCode == null && /undeliverable/i.test(s.errorTitle ?? "")) return "meta:undeliverable";
+  return null;
+}
+
 let avisouTabelaAusente = false;
 
 function avisarSeTabelaAusente(err: unknown): boolean {
@@ -72,25 +86,37 @@ export async function registrarMensagemEnviada(m: {
  * `atualizado` (avançou), `ignorado` (id desconhecido — texto livre de conversa, por
  * exemplo — ou status que não avança) ou `erro`.
  */
+export type AtualizacaoEntrega = {
+  resultado: "atualizado" | "ignorado" | "erro";
+  /** Preenchidos quando avançou: ligam o status à notificação de origem (para o registro de saída). */
+  reservationCode: string | null;
+  template: string | null;
+  destinatario: string | null;
+};
+
 export async function atualizarStatusEntrega(s: {
   messageId: string;
   status: string;
   errorTitle?: string | null;
-}): Promise<"atualizado" | "ignorado" | "erro"> {
-  if (!s.messageId || ORDEM[s.status as StatusEntrega] === undefined) return "ignorado";
+}): Promise<AtualizacaoEntrega> {
+  const nada = (resultado: AtualizacaoEntrega["resultado"]): AtualizacaoEntrega => ({ resultado, reservationCode: null, template: null, destinatario: null });
+  if (!s.messageId || ORDEM[s.status as StatusEntrega] === undefined) return nada("ignorado");
   try {
-    const r = await pool.query(
+    const r = await pool.query<{ reservation_code: string | null; template: string | null; destinatario: string | null }>(
       `UPDATE public.aria_delivery_status
           SET status = $2, status_at = NOW(), error_title = COALESCE($3, error_title)
         WHERE wa_message_id = $1
           AND CASE status WHEN 'sent' THEN 1 WHEN 'delivered' THEN 2 WHEN 'read' THEN 3 WHEN 'failed' THEN 9 ELSE 0 END
-            < CASE $2    WHEN 'sent' THEN 1 WHEN 'delivered' THEN 2 WHEN 'read' THEN 3 WHEN 'failed' THEN 9 ELSE 0 END`,
+            < CASE $2    WHEN 'sent' THEN 1 WHEN 'delivered' THEN 2 WHEN 'read' THEN 3 WHEN 'failed' THEN 9 ELSE 0 END
+        RETURNING reservation_code, template, destinatario`,
       [s.messageId, s.status, s.errorTitle ?? null],
     );
-    return (r.rowCount ?? 0) > 0 ? "atualizado" : "ignorado";
+    const linha = r.rows[0];
+    if (!linha) return nada("ignorado");
+    return { resultado: "atualizado", reservationCode: linha.reservation_code, template: linha.template, destinatario: linha.destinatario };
   } catch (err) {
     if (!avisarSeTabelaAusente(err)) console.warn("[entrega] falha ao atualizar status:", err instanceof Error ? err.message : err);
-    return "erro";
+    return nada("erro");
   }
 }
 

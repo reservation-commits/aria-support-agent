@@ -7,6 +7,7 @@ import { config } from "./config.js";
 import {
   parseIncoming,
   extractStatuses,
+  type DeliveryStatus,
   type WhatsAppWebhookPayload,
   type AriaContentBlock,
   type ParsedMessage,
@@ -37,7 +38,9 @@ import { notificarEstabelecimento, startVenueReminders, type ResultadoEstabeleci
 import { startCompromissos } from "./compromissos.js";
 import { startReservationWatch } from "./watcher.js";
 import { avisoSeEstabelecimento } from "./venueIdentity.js";
-import { atualizarStatusEntrega } from "./deliveryStatus.js";
+import { atualizarStatusEntrega, motivoBloqueio } from "./deliveryStatus.js";
+import { marcarWhatsAppIndisponivel, limparWhatsAppIndisponivel } from "./db.js";
+import { registrarSaida } from "./outboundLog.js";
 import { parsePayloadEvento } from "./eventFormat.js";
 import { avaliarTelefone, podeReceberWhatsApp } from "./phoneQuality.js";
 import { normalizarIdioma, IDIOMAS_ACEITOS } from "./templateLocale.js";
@@ -189,9 +192,9 @@ app.post(config.webhookPath, (req, res) => {
   // não está lá e é ignorado). Falha continua no console, agora também gravada.
   for (const s of extractStatuses(payload)) {
     if (s.status === "failed") {
-      console.warn(`[webhook] entrega FALHOU para ${s.recipient ?? "?"}: ${s.errorTitle ?? "sem detalhe"} (msg ${s.id})`);
+      console.warn(`[webhook] entrega FALHOU para ${s.recipient ?? "?"}: ${s.errorTitle ?? "sem detalhe"} (código ${s.errorCode ?? "?"}, msg ${s.id})`);
     }
-    void atualizarStatusEntrega({ messageId: s.id, status: s.status, errorTitle: s.errorTitle });
+    void tratarStatusEntrega(s);
   }
 
   void handleMessage(payload).catch((err) => {
@@ -402,7 +405,39 @@ async function handleMessage(payload: WhatsAppWebhookPayload): Promise<void> {
   }
 }
 
+/**
+ * v18: avança o status da notificação. v19: "undeliverable" põe o número na lista de bloqueio
+ * (decisão do fundador, 2026-10-01) — a próxima notificação daquela casa ou cliente não sai
+ * até alguém corrigir o número, e o bloqueio fica registrado no canário.
+ */
+async function tratarStatusEntrega(s: DeliveryStatus): Promise<void> {
+  const avanco = await atualizarStatusEntrega({ messageId: s.id, status: s.status, errorTitle: s.errorTitle });
+  const bloqueio = motivoBloqueio(s);
+  if (!bloqueio || !s.recipient) return;
+  const telefone = "+" + s.recipient.replace(/\D/g, "");
+  try {
+    const n = await marcarWhatsAppIndisponivel(telefone, bloqueio);
+    if (n === 0) return; // sem linha de consentimento, ou já bloqueado
+    console.warn(`[bloqueio] número sem WhatsApp entrou na lista de bloqueio (${bloqueio}; reserva ${avanco.reservationCode ?? "?"}, ${avanco.destinatario ?? "?"})`);
+    await registrarSaida({
+      origem: "evento",
+      desfecho: "bloqueado_indisponivel",
+      evento: "status_entrega",
+      reservationCode: avanco.reservationCode,
+      template: avanco.template,
+      motivo: `${bloqueio}: ${s.errorTitle ?? "Message undeliverable"} — número bloqueado até correção`,
+    });
+  } catch (err) {
+    console.warn("[bloqueio] falha ao marcar indisponível:", err instanceof Error ? err.message : err);
+  }
+}
+
 async function handleOneMessage(parsed: ParsedMessage): Promise<void> {
+  // v19: quem nos escreve tem WhatsApp — sai da lista de bloqueio por indisponibilidade (o PARAR fica).
+  void limparWhatsAppIndisponivel("+" + parsed.chatId.replace(/\D/g, ""))
+    .then((n) => { if (n > 0) console.log(`[bloqueio] número voltou a falar conosco — bloqueio por indisponibilidade removido`); })
+    .catch(() => {});
+
   // Descarta silenciosamente mensagens já processadas.
   // 1) Cache em memória — caminho rápido para o reenvio em milissegundos.
   if (isDuplicate(parsed.messageId)) {

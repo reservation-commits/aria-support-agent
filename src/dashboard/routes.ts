@@ -33,6 +33,7 @@ import {
   listExperienceReviews,
   getReviewsSummary,
   countOptedOut,
+  countIndisponiveis,
   getUsageSummary,
   listScopeBlocks,
   countScopeBlocksToday,
@@ -483,13 +484,14 @@ export function createDashboardRouter(): express.Router {
   // Status do outbound proativo (lembretes) + últimos enviados.
   router.get("/api/reminders", auth, async (_req, res) => {
     try {
-      const [recent, optedOut] = await Promise.all([listRecentReminders(50), countOptedOut()]);
+      const [recent, optedOut, indisponiveis] = await Promise.all([listRecentReminders(50), countOptedOut(), countIndisponiveis().catch(() => 0)]);
       res.json({
         enabled: config.reminders.enabled,
         template: config.reminders.template || null,
         default_locale: config.reminders.defaultLocale,
         locales: config.reminders.locales,
         opted_out_count: optedOut,
+        indisponivel_count: indisponiveis,
         review_enabled: config.review.enabled,
         review_template: config.review.template || null,
         briefing_enabled: config.briefing.enabled,
