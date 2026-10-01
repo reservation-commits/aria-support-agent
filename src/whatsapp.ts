@@ -70,10 +70,27 @@ async function postWithRetry(
   label: string,
   maxRetries = 2,
 ): Promise<boolean> {
+  return (await postMensagem(payload, label, maxRetries)).ok;
+}
+
+/** Resultado de um POST de mensagem: `messageId` é o `wamid` que a Meta devolve e que os webhooks de status citam. */
+export type EnvioMensagem = { ok: boolean; messageId: string | null };
+
+/**
+ * v18: o mesmo POST, mas devolvendo o id da mensagem. Sem ele não há como ligar o
+ * "entregue / lido / falhou" do webhook à notificação que saiu (aria_delivery_status).
+ */
+async function postMensagem(
+  payload: Record<string, unknown>,
+  label: string,
+  maxRetries = 2,
+): Promise<EnvioMensagem> {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      await graphClient.post(`/${config.whatsapp.phoneNumberId}/messages`, payload);
-      return true;
+      const res = await graphClient.post(`/${config.whatsapp.phoneNumberId}/messages`, payload);
+      const data = res.data as { messages?: Array<{ id?: string }> } | undefined;
+      const messageId = data?.messages?.[0]?.id ?? null;
+      return { ok: true, messageId };
     } catch (err) {
       const status = axios.isAxiosError(err) ? err.response?.status : undefined;
       const e = axios.isAxiosError(err) ? err.response?.data?.error : undefined;
@@ -88,15 +105,15 @@ async function postWithRetry(
       // Fora da janela de 24h ou erro de payload → não adianta repetir.
       if (code && OUT_OF_WINDOW_CODES.has(code)) {
         console.warn(`[wa.${label}] fora da janela de 24h — use template para outbound. Mensagem não entregue.`);
-        return false;
+        return { ok: false, messageId: null };
       }
       const transient = !status || status >= 500 || status === 429;
-      if (!transient || attempt === maxRetries) return false;
+      if (!transient || attempt === maxRetries) return { ok: false, messageId: null };
 
       await sleep(500 * 2 ** attempt); // 500ms, 1s
     }
   }
-  return false;
+  return { ok: false, messageId: null };
 }
 
 // ─── Mensagens ricas (interactive / location) ────────────────────────────────
@@ -231,10 +248,11 @@ export async function sendTemplate(params: {
   bodyParams: string[];
   /** Sufixo dinâmico do botão de URL do template (ex.: código da reserva em /r/{{1}}). */
   buttonUrlParam?: string;
-}): Promise<boolean> {
-  // Usa o MESMO postWithRetry do texto livre: uma falha transitória da Cloud
+}): Promise<EnvioMensagem> {
+  // Usa o MESMO POST com retry do texto livre: uma falha transitória da Cloud
   // API (5xx, rede, 429) não pode queimar uma notificação de reserva.
-  return postWithRetry(
+  // v18: devolve também o id da mensagem, para o rastreio de entrega.
+  return postMensagem(
     {
       messaging_product: "whatsapp",
       recipient_type: "individual",

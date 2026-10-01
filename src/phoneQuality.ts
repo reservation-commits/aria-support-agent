@@ -67,7 +67,13 @@ function ler(entrada: string, pais?: "BR") {
 }
 
 export function avaliarTelefone(bruto: string | null | undefined): AvaliacaoTelefone {
-  const digitos = String(bruto ?? "").replace(/\D/g, "");
+  const texto = String(bruto ?? "").trim();
+  const digitos = texto.replace(/\D/g, "");
+  // v18: o "+" na frente é o código do país DECLARADO por quem gravou o número (E.164).
+  // Um "+33 98…" não pode ser lido como "DDD 33 + celular": quem escreveu "+33" disse França.
+  // Sem o "+", a dúvida continua — é ela que impede entregar o cliente a um estranho.
+  // Caso real (30/09): La Cucina (+33 9…) e Sri Trat (+66 2…) ficaram 57 vezes em "ambíguo".
+  const declaradoInternacional = texto.startsWith("+");
 
   if (digitos.length === 0) {
     return { qualidade: "VAZIO", e164: null, pais: null, tipo: null, motivo: "telefone ausente" };
@@ -81,7 +87,7 @@ export function avaliarTelefone(bruto: string | null | undefined): AvaliacaoTele
   }
 
   const intl = ler("+" + digitos);
-  const br = digitos.length >= 10 && digitos.length <= 11 ? ler(digitos, "BR") : null;
+  const br = !declaradoInternacional && digitos.length >= 10 && digitos.length <= 11 ? ler(digitos, "BR") : null;
 
   if (intl && br) {
     return {

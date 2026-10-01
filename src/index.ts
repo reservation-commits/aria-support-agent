@@ -37,6 +37,7 @@ import { notificarEstabelecimento, startVenueReminders, type ResultadoEstabeleci
 import { startCompromissos } from "./compromissos.js";
 import { startReservationWatch } from "./watcher.js";
 import { avisoSeEstabelecimento } from "./venueIdentity.js";
+import { atualizarStatusEntrega } from "./deliveryStatus.js";
 import { parsePayloadEvento } from "./eventFormat.js";
 import { avaliarTelefone, podeReceberWhatsApp } from "./phoneQuality.js";
 import { normalizarIdioma, IDIOMAS_ACEITOS } from "./templateLocale.js";
@@ -183,11 +184,14 @@ app.post(config.webhookPath, (req, res) => {
 
   const payload = req.body as WhatsAppWebhookPayload;
 
-  // Webhooks de status (entregue/lido/falhou) não têm `messages` — observa falhas.
+  // Webhooks de status (entregue/lido/falhou) não têm `messages`. v18: cada status
+  // avança a linha da notificação em aria_delivery_status (texto livre de conversa
+  // não está lá e é ignorado). Falha continua no console, agora também gravada.
   for (const s of extractStatuses(payload)) {
     if (s.status === "failed") {
       console.warn(`[webhook] entrega FALHOU para ${s.recipient ?? "?"}: ${s.errorTitle ?? "sem detalhe"} (msg ${s.id})`);
     }
+    void atualizarStatusEntrega({ messageId: s.id, status: s.status, errorTitle: s.errorTitle });
   }
 
   void handleMessage(payload).catch((err) => {

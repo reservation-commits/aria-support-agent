@@ -47,6 +47,7 @@ import { publish } from "./dashboard/events.js";
 import { montarParametros, parsePayloadEvento } from "./eventFormat.js";
 import { escolherLocale } from "./templateLocale.js";
 import { contarEnviosHoje, registrarSaida, type RegistroSaida } from "./outboundLog.js";
+import { registrarMensagemEnviada } from "./deliveryStatus.js";
 import { avaliarTelefone, podeReceberWhatsApp } from "./phoneQuality.js";
 import { sendTemplate } from "./whatsapp.js";
 
@@ -200,9 +201,9 @@ async function decidir(body: unknown, ctx: Partial<RegistroSaida>): Promise<Resu
   // Idioma: preferência marcada no identificador → país do telefone → padrão (templateLocale.ts).
   const locale = escolherLocale({ idiomaPreferido: consent.idioma, phone: tel.e164, aprovados: config.reminders.locales, defaultLocale: config.reminders.defaultLocale }).locale;
   ctx.locale = locale;
-  const ok = await sendTemplate({ to: tel.e164, template, locale, bodyParams: params });
+  const envio = await sendTemplate({ to: tel.e164, template, locale, bodyParams: params });
 
-  if (!ok) {
+  if (!envio.ok) {
     // Devolve o claim: uma falha não pode queimar a notificação para sempre.
     await liberarEnvio(p.reservationCode, marca).catch(() => {});
     await registrarFinding(
@@ -212,6 +213,8 @@ async function decidir(body: unknown, ctx: Partial<RegistroSaida>): Promise<Resu
     );
     return { acao: "falha_envio", detalhe: `template '${template}' idioma '${locale}'` };
   }
+
+  await registrarMensagemEnviada({ messageId: envio.messageId, reservationCode: p.reservationCode, template, locale, destinatario: "cliente", evento: p.event });
 
   publish({
     kind: "tool_call",

@@ -41,11 +41,35 @@ test("celular brasileiro sem o código do país NÃO vira destino", () => {
   assert.equal(podeReceberWhatsApp(a), false);
 });
 
-test("número com duas leituras válidas fica em quarentena", () => {
+test("número SEM '+' com duas leituras válidas fica em quarentena", () => {
   // 10 dígitos: lê como fixo brasileiro no DDD 65 e também como número de
-  // Singapura. Não se adivinha.
-  const a = avaliarTelefone("+6532345678");
+  // Singapura. Sem o "+", não se adivinha.
+  const a = avaliarTelefone("6532345678");
   assert.equal(a.qualidade, "AMBIGUO_BR");
+  assert.equal(podeReceberWhatsApp(a), false);
+});
+
+test("v18: o '+' declara o país e desfaz a ambiguidade brasileira", () => {
+  // Caso real de 30/09: as casas marcadas pelo fundador têm o número em E.164 e mesmo
+  // assim ficaram 57 vezes em "ambíguo" — "+33 9…" lido como DDD 33, "+66 2…" como DDD 66.
+  for (const [numero, pais] of [
+    ["+33987654321", "FR"], // La Cucina: faixa 09 francesa
+    ["+6620123456", "TH"],  // Sri Trat: fixo de Bangkok
+    ["+6532345678", "SG"],  // o mesmo número do teste acima, agora com "+"
+  ] as const) {
+    const a = avaliarTelefone(numero);
+    assert.notEqual(a.qualidade, "AMBIGUO_BR", `${numero} não pode ser ambíguo com o "+"`);
+    assert.equal(a.pais, pais);
+    assert.equal(a.e164, numero, "o E.164 fica disponível para a casa marcada");
+  }
+});
+
+test("v18: '+' na frente de um celular brasileiro SEM o 55 não vira destino", () => {
+  // "+21 9…" não é DDD 21: é um código de país inexistente. Sem leitura brasileira
+  // de reserva, cai em inválido — e não no Egito.
+  const a = avaliarTelefone("+21967841007");
+  assert.equal(a.qualidade, "INVALIDO");
+  assert.equal(a.e164, null);
   assert.equal(podeReceberWhatsApp(a), false);
 });
 
@@ -75,7 +99,7 @@ test("só ENVIAVEL abre a porta — nenhum outro veredito passa", () => {
   const vereditos = [
     avaliarTelefone("+551133334444"), // não móvel
     avaliarTelefone("21967841007"),   // corrigível
-    avaliarTelefone("+6532345678"),   // ambíguo
+    avaliarTelefone("6532345678"),    // ambíguo (sem "+")
     avaliarTelefone("12345"),         // inválido
     avaliarTelefone(""),              // vazio
   ];

@@ -458,6 +458,33 @@ export async function runDashboardMigrations(): Promise<void> {
         ON public.aria_outbound_log (reservation_code);
     `);
 
+    // ── v18: rastreio de entrega ──────────────────────────────────────────────
+    // "Enviado" é a Cloud API aceitar. Se a casa RECEBEU e LEU vem depois, pelo
+    // webhook de status, citando o wamid. Uma linha por template enviado; o status
+    // só avança (sent → delivered → read; failed é terminal). Sem telefone.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS public.aria_delivery_status (
+        wa_message_id    TEXT PRIMARY KEY,
+        reservation_code TEXT,
+        template         TEXT,
+        locale           TEXT,
+        destinatario     TEXT NOT NULL DEFAULT 'cliente',
+        evento           TEXT,
+        status           TEXT NOT NULL DEFAULT 'sent',
+        error_title      TEXT,
+        sent_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        status_at        TIMESTAMPTZ
+      );
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS aria_delivery_status_sent_idx
+        ON public.aria_delivery_status (sent_at DESC);
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS aria_delivery_status_reserva_idx
+        ON public.aria_delivery_status (reservation_code);
+    `);
+
     // ── Fila de replay do WHATSAPP ────────────────────────────────────────────
     // O e-mail tinha fila (aria_pending_emails); o WhatsApp não. Em 19/09/2026 uma
     // mensagem de cliente chegou com o modelo fora do ar (conta sem crédito) e foi

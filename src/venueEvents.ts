@@ -36,6 +36,7 @@ import { publish } from "./dashboard/events.js";
 import { formatarData, formatarHora, formatarPessoas, toYMD, type PayloadEvento } from "./eventFormat.js";
 import { montarListaAgenda } from "./pendenciaRegra.js";
 import { contarEnviosHoje, registrarSaida, type RegistroSaida } from "./outboundLog.js";
+import { registrarMensagemEnviada } from "./deliveryStatus.js";
 import { avaliarTelefone, podeReceberWhatsApp } from "./phoneQuality.js";
 import { escolherLocale } from "./templateLocale.js";
 import { montarParametrosEstabelecimento, type EventoEstabelecimento } from "./venueFormat.js";
@@ -52,7 +53,9 @@ export type ResultadoEstabelecimento = {
     | "teto_diario"
     | "enviado"
     | "parcial"
-    | "falha_envio";
+    | "falha_envio"
+    /** v18: todos os números marcados da casa são inválidos ou ambíguos — não muda sozinho; não se repete a cada varredura. */
+    | "telefone_nao_enviavel";
   detalhe: string;
   destinatarios?: number;
 };
@@ -119,12 +122,14 @@ async function enviarParaCasa(p: {
 
   let enviados = 0;
   let falhas = 0;
+  let naoEnviaveis = 0;
   for (const d of destinatarios) {
     const tel = avaliarTelefone(d.phone);
     // Casa marcada de propósito: aceita também linha fixa (muitos restaurantes têm WhatsApp Business no fixo).
     // Número inválido ou ambíguo continua barrado; se o fixo não tiver WhatsApp, a Meta recusa e fica registrado.
     const fixoMarcado = tel.qualidade === "ENVIAVEL_NAO_MOVEL" && !!tel.e164;
     if (!podeReceberWhatsApp(tel) && !fixoMarcado) {
+      naoEnviaveis++;
       await anotar("telefone_nao_enviavel", { qualidadeTelefone: tel.qualidade, pais: tel.pais, motivo: tel.motivo });
       continue;
     }
@@ -155,8 +160,8 @@ async function enviarParaCasa(p: {
       continue;
     }
     const locale = escolherLocale({ idiomaPreferido: d.idioma, phone: numero, aprovados: config.reminders.locales, defaultLocale: config.reminders.defaultLocale }).locale;
-    const ok = await sendTemplate({ to: numero, template: p.template, locale, bodyParams: params, buttonUrlParam: p.botaoUrlParam });
-    if (!ok) {
+    const envio = await sendTemplate({ to: numero, template: p.template, locale, bodyParams: params, buttonUrlParam: p.botaoUrlParam });
+    if (!envio.ok) {
       falhas++;
       await liberarEnvio(code, marca).catch(() => {});
       await anotar("falha_envio", { locale, pais: tel.pais, qualidadeTelefone: tel.qualidade, motivo: "Cloud API recusou o envio" });
@@ -164,12 +169,19 @@ async function enviarParaCasa(p: {
     }
     enviados++;
     await anotar("enviado", { locale, pais: tel.pais, qualidadeTelefone: tel.qualidade });
+    await registrarMensagemEnviada({ messageId: envio.messageId, reservationCode: code, template: p.template, locale, destinatario: "estabelecimento", evento: p.evento });
     publish({ kind: "tool_call", chat: numero, tool: `venue_${p.evento}_${locale}`, success: true, latency_ms: 0, at: new Date().toISOString() });
     console.log(`[evento-estabelecimento] ${p.evento} enviado · reserva ${code} · ${tel.pais} · ${locale}`);
   }
 
   if (falhas > 0) {
     await finding(`envio de '${p.evento}' à casa falhou ${falhas}x na Cloud API (reserva ${code}, template '${p.template}') — conferir aprovação do template no idioma`, code);
+  }
+  // v18: casa cujos números marcados são TODOS inválidos/ambíguos. Isso não muda entre uma varredura e
+  // a próxima (muda quando alguém corrige o consentimento), então é desfecho definitivo para a varredura:
+  // antes, La Cucina e Sri Trat geravam 3 linhas por hora, cada uma, para sempre.
+  if (enviados === 0 && falhas === 0 && naoEnviaveis === destinatarios.length) {
+    return { acao: "telefone_nao_enviavel", detalhe: `${naoEnviaveis} número(s) inválido(s) ou ambíguo(s)`, destinatarios: destinatarios.length };
   }
   if (enviados === 0) return { acao: "falha_envio", detalhe: `0 de ${destinatarios.length}`, destinatarios: destinatarios.length };
   if (enviados < destinatarios.length) return { acao: "parcial", detalhe: `${enviados} de ${destinatarios.length}`, destinatarios: destinatarios.length };
@@ -207,7 +219,9 @@ const KIND_VENUE_BRIEFING = "venue_briefing";
  * novo (o dedup do envio é liberado na falha). Sem destinatário e teto também esperam.
  */
 function desfechoDefinitivo(acao: ResultadoEstabelecimento["acao"]): boolean {
-  return acao === "enviado" || acao === "parcial" || acao === "dados_insuficientes";
+  // v18: "telefone_nao_enviavel" também encerra a varredura para aquela reserva. Quem corrigir o
+  // número da casa no consentimento não reabre as reservas já marcadas — só as próximas.
+  return acao === "enviado" || acao === "parcial" || acao === "dados_insuficientes" || acao === "telefone_nao_enviavel";
 }
 
 export async function sweepVesperaEstabelecimento(): Promise<void> {

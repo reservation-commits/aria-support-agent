@@ -38,6 +38,7 @@ import { formatarData, formatarHora, formatarPessoas } from "./eventFormat.js";
 import { consultaMapa, enderecoParaFicha } from "./pendenciaRegra.js";
 import { publish } from "./dashboard/events.js";
 import { registrarSaida, type OrigemSaida, type RegistroSaida } from "./outboundLog.js";
+import { registrarMensagemEnviada } from "./deliveryStatus.js";
 import { avaliarTelefone, podeReceberWhatsApp } from "./phoneQuality.js";
 
 const KIND = "2h";
@@ -146,8 +147,8 @@ async function enviarLote(p: {
       await encerrar(r, to);
       continue;
     }
-    const ok = await sendTemplate({ to, template: nomeTemplate(r), locale, bodyParams, buttonUrlParam: p.botaoUrl?.(r) });
-    if (!ok) {
+    const envio = await sendTemplate({ to, template: nomeTemplate(r), locale, bodyParams, buttonUrlParam: p.botaoUrl?.(r) });
+    if (!envio.ok) {
       falhas++;
       await anotar("falha_envio", r, { locale, qualidadeTelefone: tel.qualidade, pais: tel.pais, motivo: "Cloud API recusou o envio" });
       continue;
@@ -156,6 +157,7 @@ async function enviarLote(p: {
     await markReminderSent(r.reservation_code, p.kind, to).catch(() => {});
     enviados++;
     await anotar("enviado", r, { locale, qualidadeTelefone: tel.qualidade, pais: tel.pais });
+    await registrarMensagemEnviada({ messageId: envio.messageId, reservationCode: r.reservation_code, template: nomeTemplate(r), locale, destinatario: "cliente", evento: p.kind });
     publish({
       kind: "tool_call",
       chat: to,
