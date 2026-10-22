@@ -11,7 +11,8 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { runAgent } from "./claude.js";
 import type { AgentIdentity } from "./identity.js";
-import { logEscalation } from "./db.js";
+import { logEscalationAcionavel } from "./db.js";
+import { donoPadrao, prefixoResponder, resumoResponder } from "./escalacaoRegra.js";
 import { logScopeBlock } from "./dashboard/logger.js";
 import { revisarResposta } from "./revisao.js";
 import type { Destinatario } from "./juizRegua.js";
@@ -112,9 +113,13 @@ export async function responderComRevisao(p: {
     reason: `retida após reescrita: ${motivos.join("; ")}`.slice(0, 500),
     snippet: (clean || primeiro.reply).slice(0, 300),
   }).catch(() => {});
-  await logEscalation({
-    tag: "ALTA",
-    summary: `[revisao] resposta ${destinatario === "estabelecimento" ? "ao ESTABELECIMENTO" : "ao cliente"} RETIDA no canal ${p.channel} após reescrita — ${motivos.slice(0, 3).join("; ").slice(0, 200)}. O cliente NÃO recebeu resposta: responder pelo painel.`,
+  // v22 (plano B4): escalação ACIONÁVEL, com dono e uma por conversa — o destinatário ficou sem resposta
+  // e alguém precisa responder pelo painel. Os motivos completos estão em aria_scope_blocks (acima).
+  await logEscalationAcionavel({
+    tag: "RESPONDER",
+    summary: resumoResponder(p.chatId, p.channel, `resposta ${destinatario === "estabelecimento" ? "ao ESTABELECIMENTO" : "ao cliente"} retida duas vezes na revisão (${motivos.slice(0, 2).join("; ").slice(0, 120)})`),
+    prefixo: prefixoResponder(p.chatId),
+    dono: donoPadrao("RESPONDER"),
     phone: p.channel === "whatsapp" ? p.chatId : "",
   }).catch(() => {});
   return { reply: null, updatedHistory: historico, retida: { motivos, tentativas: 2 } };

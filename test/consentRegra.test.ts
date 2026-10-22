@@ -44,3 +44,15 @@ test("estabelecimento segue a mesma regra", () => {
   assert.equal(decidirEnvioWhatsApp({ whatsapp_reservas: true, outbound_opted_out: false, tipo: "estabelecimento" }).ok, true);
   assert.equal(decidirEnvioWhatsApp({ whatsapp_reservas: false, outbound_opted_out: false, tipo: "estabelecimento" }).ok, false);
 });
+
+test("v20: casa sem destinatário — o registro diz por quê (não marcada ≠ bloqueada ≠ PARAR ≠ opt-out de listagem)", async () => {
+  const { explicarSemDestinatario } = await import("../src/consentRegra.js");
+  const linha = (o: Partial<{ whatsapp_reservas: boolean; outbound_opted_out: boolean; whatsapp_indisponivel: boolean }>) =>
+    ({ whatsapp_reservas: true, outbound_opted_out: false, whatsapp_indisponivel: false, ...o });
+  assert.match(explicarSemDestinatario([], false), /nenhum número da casa marcado/);
+  assert.match(explicarSemDestinatario([linha({ whatsapp_reservas: false })], false), /nenhum número da casa marcado/);
+  assert.match(explicarSemDestinatario([linha({ whatsapp_indisponivel: true })], false), /lista de bloqueio/);
+  assert.match(explicarSemDestinatario([linha({ outbound_opted_out: true })], false), /PARAR/);
+  assert.match(explicarSemDestinatario([linha({ outbound_opted_out: true }), linha({ whatsapp_indisponivel: true })], false), /lista de bloqueio/);
+  assert.match(explicarSemDestinatario([linha({})], true), /Opt-out de Listagem/);
+});

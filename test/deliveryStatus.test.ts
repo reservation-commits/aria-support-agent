@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import "./_env.js"; // antes do módulo: ele carrega a configuração, que exige as variáveis
 import { avancaStatus, motivoBloqueio, META_UNDELIVERABLE } from "../src/deliveryStatus.js";
 
 test("v19: só 'undeliverable' põe o número na lista de bloqueio", () => {

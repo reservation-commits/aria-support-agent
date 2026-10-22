@@ -2,11 +2,16 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { eventoPorStatus, normalizarStatusReserva, pedidoRecente } from "../src/watchRegra.js";
 
-test("vigia: linha nova em pending é pedido recebido; nova em outro status não é nada", () => {
+test("vigia: linha nova em pending é pedido recebido; nova já respondida avisa o desfecho (v20)", () => {
   assert.equal(eventoPorStatus(null, "Pending"), "pedido_recebido");
   assert.equal(eventoPorStatus(null, " pending "), "pedido_recebido");
-  assert.equal(eventoPorStatus(null, "Accept"), null);
+  // v20: aceita ou recusada antes da primeira foto (caso de 02/10: aceite em menos de 2 min sem aviso)
+  assert.equal(eventoPorStatus(null, "Accept"), "aceito");
+  assert.equal(eventoPorStatus(null, "Decline"), "recusado");
+  // cancelada pelo próprio cliente antes da primeira foto, ou status desconhecido: nada
   assert.equal(eventoPorStatus(null, "declined (client)"), null);
+  assert.equal(eventoPorStatus(null, "in treatment"), null);
+  assert.equal(eventoPorStatus(null, ""), null);
 });
 
 test("vigia: transições viram os eventos certos", () => {

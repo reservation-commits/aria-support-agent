@@ -309,6 +309,20 @@ export const config = {
     minIntervalMin: Number(process.env.ALERT_MIN_INTERVAL_MIN ?? 30),
   },
 
+  operatorAlert: {
+    // v20: alerta que CHEGA AO CELULAR de quem opera. De 02 a 05/10/2026 a Aria ficou 70 horas
+    // sem responder (crédito da Anthropic) e o único aviso era uma escalação num painel fechado.
+    // Template de WhatsApp para o número do operador: não depende do modelo, do painel nem de
+    // e-mail. Sem número ou sem template = desligado (o /health mostra).
+    to: (process.env.OPERATOR_ALERT_WHATSAPP_TO ?? "").trim(),
+    template: (process.env.OPERATOR_ALERT_TEMPLATE ?? "").trim(),
+    locale: (process.env.OPERATOR_ALERT_LOCALE ?? "pt_BR").trim(),
+    // Enquanto o incidente durar, repete o aviso a cada N horas (0 = só o primeiro e o de volta).
+    repeatHours: Number(process.env.OPERATOR_ALERT_REPEAT_HOURS ?? 12),
+    // v21: a cada versão que sobe, um aviso de teste confirma variável, template, número e entrega.
+    onBoot: (process.env.OPERATOR_ALERT_ON_BOOT ?? "true").toLowerCase() !== "false",
+  },
+
   scope: {
     // Bloqueio de escopo: a Aria só responde clientes e estabelecimentos sobre
     // assuntos da plataforma. Newsletters, marketing, propaganda e relatórios

@@ -95,7 +95,8 @@ export async function varrerReservas(): Promise<{ eventos: number }> {
 
     let evento = eventoPorStatus(anterior, atual);
     // Linha nova: só anuncia se o pedido é recente (e nunca na primeira varredura de uma linha antiga).
-    if (evento === "pedido_recebido" && !pedidoRecente(r.created_date, agora, HORAS_PEDIDO_NOVO)) evento = null;
+    // v20: vale para todo evento de linha nova (pedido, e o aceite/recusa que chegou antes da primeira foto).
+    if (anterior === null && evento && !pedidoRecente(r.created_date, agora, HORAS_PEDIDO_NOVO)) evento = null;
     if (primeira && evento !== "pedido_recebido") evento = null; // primeira foto: só pedidos das últimas horas
 
     await gravar(r.reservation_code, atual, anterior !== null && anterior !== atual).catch((err) =>

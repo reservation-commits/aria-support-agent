@@ -13,7 +13,8 @@
  */
 
 import { config } from "./config.js";
-import { logEscalation } from "./db.js";
+import { emailDoCliente, logEscalation, logEscalationAcionavel } from "./db.js";
+import { donoPadrao, prefixoResponder, resumoResponder } from "./escalacaoRegra.js";
 import { logMessage } from "./dashboard/logger.js";
 import { isBusy } from "./conversationQueue.js";
 import { enviarEmailProativo } from "./emailChannel.js";
@@ -56,14 +57,20 @@ async function cumprir(c: Compromisso): Promise<void> {
   });
   setHistory(chatId, r.updatedHistory);
 
-  if (!r.reply) {
-    await concluir(c.id, "retido");
-    await logEscalation({
-      tag: "ALTA",
-      summary: `[compromisso] vence hoje (${c.due_at}) e a resposta foi RETIDA na revisão — o cliente espera o retorno prometido. Responder pelo painel.`,
+  // v22 (plano B4): tudo que impede a Aria de cumprir o compromisso vira UMA escalação acionável por conversa.
+  const responder = (porque: string) =>
+    logEscalationAcionavel({
+      tag: "RESPONDER",
+      summary: resumoResponder(chatId, c.channel, `compromisso vence hoje (${c.due_at}) e ${porque}`),
+      prefixo: prefixoResponder(chatId),
+      dono: donoPadrao("RESPONDER"),
       phone: c.channel === "whatsapp" ? chatId : "",
       reservationCode: c.reservation_code,
     }).catch(() => {});
+
+  if (!r.reply) {
+    await concluir(c.id, "retido");
+    await responder("a resposta foi retida na revisão — o cliente espera o retorno prometido");
     return;
   }
 
@@ -86,13 +93,24 @@ async function cumprir(c: Compromisso): Promise<void> {
   } else {
     const aberta = !!entrada && Date.now() - new Date(entrada.created_at).getTime() < JANELA_WHATSAPP_MS;
     if (!aberta) {
+      // v22 (plano B3): janela fechada → a MESMA carta sai pelo e-mail do pedido (canal pelo qual a reserva
+      // foi feita). Em 16 e 19/10 duas cartas prontas venceram na fila "enviar manualmente" e ninguém enviou.
+      const email = config.email.enabled ? await emailDoCliente({ chatId, reservationCode: c.reservation_code }).catch(() => null) : null;
+      if (email) {
+        ok = await enviarEmailProativo(
+          { to: email, subject: c.reservation_code ? `Your request ${c.reservation_code}` : null, threadId: null, messageIdHeader: null, references: null, gmailMessageId: null, mailbox: config.email.address },
+          r.reply,
+          idiomaProvavel(entrada?.content ?? "") ?? undefined,
+        );
+        if (ok) {
+          await concluir(c.id, "cumprido");
+          void logMessage({ chatId, pushName: null, direction: "outbound", content: `[por e-mail, janela do WhatsApp fechada] ${r.reply}` }).catch(() => {});
+          console.log(`[compromisso] cumprido por E-MAIL (janela do WhatsApp fechada) · ${c.due_at}${c.reservation_code ? ` · reserva ${c.reservation_code}` : ""}`);
+          return;
+        }
+      }
       await concluir(c.id, "sem_canal");
-      await logEscalation({
-        tag: "ALTA",
-        summary: `[compromisso] vence hoje (${c.due_at}) mas a janela de 24h do WhatsApp está fechada — enviar manualmente. Carta pronta no histórico da conversa.`,
-        phone: chatId,
-        reservationCode: c.reservation_code,
-      }).catch(() => {});
+      await responder(email ? "o envio por e-mail falhou (janela do WhatsApp fechada) — carta pronta no histórico da conversa" : "a janela de 24h do WhatsApp está fechada e não há e-mail do cliente — carta pronta no histórico da conversa");
       return;
     }
     ok = await sendText(chatId, r.reply);
@@ -103,7 +121,7 @@ async function cumprir(c: Compromisso): Promise<void> {
     void logMessage({ chatId, pushName: null, direction: "outbound", content: r.reply }).catch(() => {});
     console.log(`[compromisso] cumprido · ${c.channel} · ${c.due_at}${c.reservation_code ? ` · reserva ${c.reservation_code}` : ""}`);
   } else {
-    await logEscalation({ tag: "ALTA", summary: `[compromisso] vence hoje (${c.due_at}) e o envio falhou no canal ${c.channel}`, phone: c.channel === "whatsapp" ? chatId : "", reservationCode: c.reservation_code }).catch(() => {});
+    await responder(`o envio falhou no canal ${c.channel}`);
   }
 }
 

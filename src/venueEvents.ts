@@ -32,6 +32,7 @@ import {
   type EventReservationRow,
   type ReminderRow,
 } from "./db.js";
+import { explicarSemDestinatario } from "./consentRegra.js";
 import { publish } from "./dashboard/events.js";
 import { formatarData, formatarHora, formatarPessoas, toYMD, type PayloadEvento } from "./eventFormat.js";
 import { montarListaAgenda } from "./pendenciaRegra.js";
@@ -60,7 +61,8 @@ export type ResultadoEstabelecimento = {
   destinatarios?: number;
 };
 
-type Destinatario = { phone: string; idioma: string | null };
+/** v22: `pais` = país do restaurante no catálogo (ISO-2) — resolve número ambíguo "FR internacional ou BR nacional". */
+type Destinatario = { phone: string; idioma: string | null; pais?: string | null };
 
 /**
  * Números da casa marcados para receber (máx. 3), já em E.164 e sem opt-out.
@@ -76,14 +78,29 @@ export async function getVenueRecipients(restaurantId: string): Promise<Destinat
     return [];
   }
   const { rows } = await pool.query<Destinatario>(
-    `SELECT phone, idioma FROM public.aria_contact_consent
-      WHERE tipo = 'estabelecimento' AND restaurant_id = $1
-        AND whatsapp_reservas = true AND outbound_opted_out = false
-        AND COALESCE(whatsapp_indisponivel, false) = false
-      ORDER BY updated_at DESC LIMIT 3`,
+    `SELECT c.phone, c.idioma, upper(btrim(d.country_code)) AS pais
+       FROM public.aria_contact_consent c
+       LEFT JOIN public.db_restaurants d ON d.restaurant_id = c.restaurant_id
+      WHERE c.tipo = 'estabelecimento' AND c.restaurant_id = $1
+        AND c.whatsapp_reservas = true AND c.outbound_opted_out = false
+        AND COALESCE(c.whatsapp_indisponivel, false) = false
+      ORDER BY c.updated_at DESC LIMIT 3`,
     [restaurantId],
   );
   return rows;
+}
+
+async function motivoSemDestinatario(restaurantId: string): Promise<string> {
+  try {
+    const optout = await pool.query(`SELECT 1 FROM public.v_listing_consent_atual WHERE restaurant_id = $1 LIMIT 1`, [restaurantId]);
+    const { rows } = await pool.query<{ whatsapp_reservas: boolean; outbound_opted_out: boolean; whatsapp_indisponivel: boolean | null }>(
+      `SELECT whatsapp_reservas, outbound_opted_out, whatsapp_indisponivel FROM public.aria_contact_consent WHERE tipo = 'estabelecimento' AND restaurant_id = $1`,
+      [restaurantId],
+    );
+    return explicarSemDestinatario(rows, (optout.rowCount ?? 0) > 0);
+  } catch {
+    return "registro de consentimento ilegível — nenhum contato";
+  }
 }
 
 async function finding(resumo: string, code: string | null): Promise<void> {
@@ -117,15 +134,19 @@ async function enviarParaCasa(p: {
   }
   const destinatarios = await getVenueRecipients(p.r.restaurant_id);
   if (destinatarios.length === 0) {
-    await anotar("sem_destinatario", { motivo: "nenhum número da casa marcado para receber" });
-    return { acao: "sem_destinatario", detalhe: "casa não marcada para WhatsApp", destinatarios: 0 };
+    // v20: o registro dizia sempre "nenhum número marcado" — inclusive para a casa marcada cujo
+    // número caiu na lista de bloqueio. São perguntas diferentes para quem lê o canário.
+    const motivo = await motivoSemDestinatario(p.r.restaurant_id);
+    await anotar("sem_destinatario", { motivo });
+    return { acao: "sem_destinatario", detalhe: motivo, destinatarios: 0 };
   }
 
   let enviados = 0;
   let falhas = 0;
   let naoEnviaveis = 0;
   for (const d of destinatarios) {
-    const tel = avaliarTelefone(d.phone);
+    // v22 (plano C3): o país do cadastro desempata o número ambíguo — determinístico, sem adivinhar.
+    const tel = avaliarTelefone(d.phone, d.pais ?? null);
     // Casa marcada de propósito: aceita também linha fixa (muitos restaurantes têm WhatsApp Business no fixo).
     // Número inválido ou ambíguo continua barrado; se o fixo não tiver WhatsApp, a Meta recusa e fica registrado.
     const fixoMarcado = tel.qualidade === "ENVIAVEL_NAO_MOVEL" && !!tel.e164;
@@ -237,9 +258,10 @@ export async function sweepVesperaEstabelecimento(): Promise<void> {
   for (const r of rows) {
     if (r.tz_valido === false) continue; // sem fuso confiável não se lembra ninguém (mesma regra do cliente)
     const res = await enviarParaCasa({ evento: "vespera", template: config.venueBriefing.template, r, origem: "briefing" });
-    // Marca a reserva como tratada só com desfecho definitivo; sem destinatário marcado, falha da
-    // Cloud API ou teto, não gasta a marca — a próxima varredura tenta de novo.
-    if (desfechoDefinitivo(res.acao)) {
+    // Marca a reserva como tratada só com desfecho definitivo; falha da Cloud API ou teto não gastam
+    // a marca — a próxima varredura tenta de novo. v20: "sem destinatário" também encerra AQUI — a
+    // janela da véspera dura 1 h e a varredura gravava 3 linhas iguais por mesa de casa não marcada.
+    if (desfechoDefinitivo(res.acao) || res.acao === "sem_destinatario") {
       await markReminderSent(r.reservation_code, KIND_VENUE_BRIEFING, r.restaurant_id ?? "").catch(() => {});
     }
   }

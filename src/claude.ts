@@ -3,7 +3,7 @@ import { config } from "./config.js";
 import { systemPromptFor } from "./systemPrompt.js";
 import { buildTemporalContext } from "./datetime.js";
 import { tools, runTool } from "./tools.js";
-import { logEscalation, recordLlmUsage } from "./db.js";
+import { logEscalationUnica, recordLlmUsage } from "./db.js";
 import { publish } from "./dashboard/events.js";
 import { compactToolResults } from "./historyTrim.js";
 import { effectiveModel, recordSpend } from "./costGuard.js";
@@ -101,7 +101,8 @@ async function alertarModeloIndisponivel(status: number | undefined, err: unknow
   publish({ kind: "error", where: "claude", message: resumo, at: new Date().toISOString() });
   if (Date.now() - ultimoAlertaModelo > 3_600_000) {
     ultimoAlertaModelo = Date.now();
-    await logEscalation({ tag: "URGENTE", summary: resumo, phone: "" }).catch(() => {});
+    // v20: uma escalação por incidente — se o monitor (ou um turno anterior) já abriu, não repete.
+    await logEscalationUnica({ tag: "URGENTE", summary: resumo, prefixos: ["[monitor] modelo da Anthropic inacessível", "[claude] modelo indisponível"] }).catch(() => {});
   }
 }
 

@@ -825,6 +825,113 @@ export async function logEscalation(p: {
   );
 }
 
+/**
+ * v20: uma escalação por INCIDENTE. De 02 a 05/10/2026 o modelo ficou sem crédito por 70 horas e
+ * o painel recebeu 76 escalações URGENTE do mesmo fato (dedup de 1 h em memória). Aqui o dedup é
+ * o próprio painel: enquanto houver escalação ABERTA cujo resumo começa com um dos `prefixos`,
+ * não se abre outra. Devolve true se abriu.
+ */
+export async function logEscalationUnica(p: {
+  tag: string;
+  summary: string;
+  prefixos: string[];
+  reservationCode?: string | null;
+}): Promise<boolean> {
+  const { rows } = await pool.query(
+    `INSERT INTO public.aria_escalations (tag, summary, phone, reservation_code)
+     SELECT $1, $2, '', $3
+      WHERE NOT EXISTS (
+        SELECT 1 FROM public.aria_escalations e
+         WHERE e.status = 'open' AND left(e.summary, 200) LIKE ANY($4::text[]))
+     RETURNING id`,
+    [p.tag, p.summary, p.reservationCode ?? null, p.prefixos.map((x) => x.replace(/[\\%_]/g, "\\$&") + "%")],
+  );
+  return rows.length > 0;
+}
+
+/** v20: o incidente acabou — fecha as escalações abertas dele. Devolve quantas fechou e a mais antiga. */
+/**
+ * v22 (2026-10-22, plano B4): escalação ACIONÁVEL — nasce com dono e com a ação no resumo, uma por
+ * conversa enquanto aberta (dedup pelo prefixo `[responder] <chat>`). Devolve true se abriu.
+ */
+export async function logEscalationAcionavel(p: {
+  tag: string;
+  summary: string;
+  phone: string;
+  prefixo: string;
+  dono: string;
+  reservationCode?: string | null;
+}): Promise<boolean> {
+  const { rows } = await pool.query(
+    `INSERT INTO public.aria_escalations (tag, summary, phone, reservation_code, assigned_to)
+     SELECT $1, $2, $3, $4, $5
+      WHERE NOT EXISTS (
+        SELECT 1 FROM public.aria_escalations e
+         WHERE e.status = 'open' AND left(e.summary, 200) LIKE $6)
+     RETURNING id`,
+    [p.tag, p.summary, p.phone, p.reservationCode ?? null, p.dono, p.prefixo.replace(/[\\%_]/g, "\\$&") + "%"],
+  );
+  return rows.length > 0;
+}
+
+/**
+ * v22 (plano B4): a fila volta a ser fila. Fecha, com nota (nunca apaga), o que não pede ação humana:
+ * avisos do juiz (as notas estão em aria_quality_scores) e do revisor indisponível (o monitor já vigia o
+ * modelo), e as retenções/compromissos com mais de `dias` dias — o cliente já escreveu de novo ou a mesa
+ * já passou. Roda uma vez na subida; devolve quantas fechou.
+ */
+export async function fecharEscalacoesTelemetria(prefixosTelemetria: string[], prefixosVencem: string[], dias: number): Promise<number> {
+  const like = (xs: string[]) => xs.map((x) => x.replace(/[\\%_]/g, "\\$&") + "%");
+  const { rows } = await pool.query(
+    `UPDATE public.aria_escalations
+        SET status = 'resolved', resolved_at = NOW(), resolved_by = 'aria-v22',
+            resolution_note = CASE WHEN left(summary, 200) LIKE ANY($1::text[])
+                                   THEN 'telemetria, não escalação (B4): motivos em aria_quality_scores / aria_scope_blocks'
+                                   ELSE 'vencida (B4): mais de ' || $3 || ' dias sem ação — a conversa seguiu ou a mesa passou' END
+      WHERE status = 'open' AND tag = 'ALTA'
+        AND (left(summary, 200) LIKE ANY($1::text[])
+             OR (left(summary, 200) LIKE ANY($2::text[]) AND created_at < NOW() - ($3 || ' days')::interval))
+      RETURNING id`,
+    [like(prefixosTelemetria), like(prefixosVencem), String(dias)],
+  );
+  return rows.length;
+}
+
+/**
+ * v22 (plano B3): o e-mail do cliente de uma conversa de WhatsApp, para a carta sair pelo canal do pedido
+ * quando a janela de 24 h fechou. Ordem: número ligado por opt-in (customer_id) → reserva citada → telefone
+ * da conta igual ao número. Nunca adivinha: sem correspondência, null.
+ */
+export async function emailDoCliente(p: { chatId: string; reservationCode?: string | null }): Promise<string | null> {
+  const digitos = p.chatId.replace(/\D/g, "");
+  const { rows } = await pool.query<{ email: string | null }>(
+    `SELECT u.email
+       FROM nextauth."User" u
+      WHERE u.id = (SELECT cc.customer_id FROM public.aria_contact_consent cc
+                     WHERE cc.tipo = 'cliente' AND regexp_replace(cc.phone, '\\D', '', 'g') = $1 AND cc.customer_id IS NOT NULL
+                     ORDER BY cc.updated_at DESC LIMIT 1)
+         OR ($2::text IS NOT NULL AND u.id = (SELECT r.customer_id FROM public.reservations r WHERE r.reservation_code = $2 LIMIT 1))
+         OR ($1 <> '' AND regexp_replace(COALESCE(u.phone, ''), '\\D', '', 'g') = $1)
+      ORDER BY (u.id = (SELECT r.customer_id FROM public.reservations r WHERE r.reservation_code = $2 LIMIT 1)) DESC NULLS LAST
+      LIMIT 1`,
+    [digitos, p.reservationCode ?? null],
+  );
+  const email = rows[0]?.email?.trim().toLowerCase() ?? null;
+  return email && email.includes("@") ? email : null;
+}
+
+export async function resolverEscalacoes(prefixos: string[], nota: string): Promise<{ fechadas: number; desde: Date | null }> {
+  const { rows } = await pool.query<{ created_at: Date }>(
+    `UPDATE public.aria_escalations
+        SET status = 'resolved', resolved_at = NOW(), resolved_by = 'monitor', resolution_note = $2
+      WHERE status = 'open' AND left(summary, 200) LIKE ANY($1::text[])
+      RETURNING created_at`,
+    [prefixos.map((x) => x.replace(/[\\%_]/g, "\\$&") + "%"), nota],
+  );
+  const desde = rows.length ? new Date(Math.min(...rows.map((r) => new Date(r.created_at).getTime()))) : null;
+  return { fechadas: rows.length, desde };
+}
+
 // ─── Consentimento de outbound (opt-out de lembretes/avaliações) ──────────────
 
 export async function setOutboundConsent(
@@ -915,6 +1022,92 @@ export async function limparWhatsAppIndisponivel(phone: string): Promise<number>
   return r.rowCount ?? 0;
 }
 
+// ─── v20: opt-in pedido pelo próprio cliente ──────────────────────────────────
+
+export type ReservaOptIn = {
+  reservation_code: string;
+  customer_id: string | null;
+  restaurant_name: string | null;
+  account_phone: string | null;
+  /** Mesa de hoje em diante (ou de ontem): reserva antiga não vincula número novo. */
+  viva: boolean;
+};
+
+export async function getReservaParaOptIn(reservationCode: string): Promise<ReservaOptIn | null> {
+  const { rows } = await pool.query<ReservaOptIn>(
+    `SELECT r.reservation_code, r.customer_id, d.name AS restaurant_name, u.phone AS account_phone,
+            (r.booking_date >= CURRENT_DATE - 1) AS viva
+       FROM public.reservations r
+       LEFT JOIN public.db_restaurants d ON d.restaurant_id = r.restaurant_id
+       LEFT JOIN nextauth."User" u       ON u.id = r.customer_id
+      WHERE r.reservation_code = $1
+      LIMIT 1`,
+    [reservationCode],
+  );
+  return rows[0] ?? null;
+}
+
+/**
+ * Grava o opt-in do cliente no número que ESCREVEU e liga esse número ao cliente.
+ * O pedido explícito dele reabre o que um "PARAR" antigo tinha fechado e tira o número da lista
+ * de indisponíveis (ele acabou de escrever: tem WhatsApp). Número de estabelecimento nunca vira
+ * cliente por este caminho. Devolve false se nada foi gravado.
+ */
+export async function registrarOptInCliente(p: {
+  phone: string;
+  customerId: string;
+  idioma: string | null;
+  motivo: string;
+}): Promise<boolean> {
+  const r = await pool.query(
+    `INSERT INTO public.aria_contact_consent (phone, whatsapp_reservas, tipo, customer_id, source, motivo, idioma, updated_at)
+     VALUES ($1, true, 'cliente', $2, 'cliente_whatsapp', $3, $4, NOW())
+     ON CONFLICT (phone) DO UPDATE
+       SET whatsapp_reservas = true, customer_id = EXCLUDED.customer_id, source = EXCLUDED.source,
+           motivo = EXCLUDED.motivo, idioma = COALESCE(EXCLUDED.idioma, aria_contact_consent.idioma),
+           outbound_opted_out = false, whatsapp_indisponivel = false, indisponivel_motivo = NULL,
+           indisponivel_em = NULL, updated_at = NOW()
+     WHERE aria_contact_consent.tipo <> 'estabelecimento'`,
+    [p.phone, p.customerId, p.motivo, p.idioma],
+  );
+  return (r.rowCount ?? 0) > 0;
+}
+
+/**
+ * Quem não podia receber teve os lembretes marcados como tratados (para a varredura não regravar
+ * "sem opt-in" a cada tique). Quando o opt-in chega, essas marcas voltam a abrir — só as de mesa
+ * de ontem em diante, só as de cliente, e nunca a de uma mensagem que realmente saiu.
+ */
+export async function reabrirLembretesDoCliente(p: { customerId?: string | null; phone?: string | null }): Promise<number> {
+  if (!p.customerId && !p.phone) return 0;
+  const r = await pool.query(
+    `DELETE FROM public.aria_reminders_sent s
+      USING public.reservations r
+      WHERE r.reservation_code = s.reservation_code
+        AND s.kind = ANY($3::text[])
+        AND r.booking_date >= CURRENT_DATE - 1
+        AND (r.customer_id = $1 OR ($2::text IS NOT NULL AND s.phone = $2))
+        AND NOT EXISTS (SELECT 1 FROM public.aria_delivery_status e
+                         WHERE e.reservation_code = s.reservation_code AND e.evento = s.kind AND e.destinatario = 'cliente')
+        AND NOT EXISTS (SELECT 1 FROM public.aria_outbound_log o
+                         WHERE o.reservation_code = s.reservation_code AND o.evento = s.kind AND o.desfecho = 'enviado')`,
+    [p.customerId ?? null, p.phone ?? null, KINDS_LEMBRETE_CLIENTE],
+  );
+  return r.rowCount ?? 0;
+}
+
+/** As marcas de lembrete que pertencem ao CLIENTE (as da casa e as de evento não se reabrem aqui). */
+export const KINDS_LEMBRETE_CLIENTE = ["2h", "briefing_24h", "6h_review", "pending_nudge", "pending_close"];
+
+// ─── v20: o telefone do cliente ───────────────────────────────────────────────
+//
+// Quando o cliente pede o acompanhamento pelo WhatsApp (optIn.ts), o número que ESCREVEU fica
+// ligado a ele (`aria_contact_consent.customer_id`). Esse número — provado, com WhatsApp — passa
+// a valer antes do telefone da conta, que em 9 de 25 pedidos recentes era inválido ou fixo.
+const TELEFONE_CLIENTE = `COALESCE((SELECT cc.phone FROM public.aria_contact_consent cc
+                                   WHERE cc.customer_id = r.customer_id AND cc.tipo = 'cliente' AND cc.whatsapp_reservas
+                                   ORDER BY cc.updated_at DESC LIMIT 1), u.phone)`;
+
 // ─── Lembretes proativos (outbound) ──────────────────────────────────────────
 
 export type ReminderRow = {
@@ -929,6 +1122,8 @@ export type ReminderRow = {
   people: number | null;
   customer_phone: string | null;
   customer_name: string | null;
+  /** v22: e-mail do pedido — canal de reserva quando o WhatsApp não é possível (só nas varreduras de pendência). */
+  customer_email?: string | null;
   /** false = o fuso do restaurante não é um nome IANA que o Postgres reconheça. */
   tz_valido?: boolean;
   /** Fuso efetivamente usado para situar a reserva no tempo. */
@@ -983,7 +1178,7 @@ export async function getReservationsForReminder(
     `SELECT r.reservation_code, r.restaurant_id, d.name AS restaurant_name, d.city,
             d.address_of_establishment AS address,
             r.booking_date, r.reservation_time, r.people,
-            u.phone AS customer_phone, u.name AS customer_name,
+            ${TELEFONE_CLIENTE} AS customer_phone, u.name AS customer_name,
             (z.name IS NOT NULL) AS tz_valido,
             COALESCE(z.name, 'UTC') AS tz_usado
        FROM public.reservations r
@@ -993,7 +1188,7 @@ export async function getReservationsForReminder(
        LEFT JOIN public.aria_reminders_sent s
               ON s.reservation_code = r.reservation_code AND s.kind = $1
       WHERE lower(btrim(r.booking_status)) = ANY($4::text[])
-        AND u.phone IS NOT NULL
+        AND ${TELEFONE_CLIENTE} IS NOT NULL
         AND s.id IS NULL
         AND ((r.booking_date + COALESCE(r.reservation_time, '00:00'::time))
                AT TIME ZONE COALESCE(z.name, 'UTC'))
@@ -1037,7 +1232,7 @@ export async function getReservationForEvent(
     `SELECT r.reservation_code, r.restaurant_id, d.name AS restaurant_name, d.city,
             r.booking_date, r.reservation_time, r.people, r.booking_status,
             r.reschedule_proposed_date, r.reschedule_proposed_time,
-            u.phone AS customer_phone, u.name AS customer_name,
+            ${TELEFONE_CLIENTE} AS customer_phone, u.name AS customer_name,
             (z.name IS NOT NULL) AS tz_valido,
             COALESCE(z.name, 'UTC') AS tz_usado
        FROM public.reservations r
@@ -1179,7 +1374,8 @@ const SELECT_PENDENCIA = `
   SELECT r.reservation_code, r.restaurant_id, d.name AS restaurant_name, d.city,
          d.address_of_establishment AS address,
          r.booking_date, r.reservation_time, r.people,
-         u.phone AS customer_phone, u.name AS customer_name,
+         ${TELEFONE_CLIENTE} AS customer_phone, u.name AS customer_name,
+         u.email AS customer_email,
          (z.name IS NOT NULL) AS tz_valido,
          COALESCE(z.name, 'UTC') AS tz_usado
     FROM public.reservations r
@@ -1191,6 +1387,9 @@ const SELECT_PENDENCIA = `
    WHERE lower(btrim(r.booking_status)) = ANY($2::text[])
      AND r.expired_at IS NULL
      AND s.id IS NULL`;
+// v22 (2026-10-22, plano B3): a pendência fala com o cliente por WhatsApp OU por e-mail — quem não tem
+// telefone utilizável recebe a mesma carta pelo e-mail do pedido. Por isso a lista deixa de exigir telefone.
+const CLIENTE_ALCANCAVEL = `(${TELEFONE_CLIENTE} IS NOT NULL OR u.email IS NOT NULL)`;
 const HORA_LOCAL_DA_MESA = `((r.booking_date + COALESCE(r.reservation_time, '00:00'::time)) AT TIME ZONE COALESCE(z.name, 'UTC'))`;
 const CASA_MARCADA = `EXISTS (SELECT 1 FROM public.aria_contact_consent c
                        WHERE c.restaurant_id = r.restaurant_id AND c.tipo = 'estabelecimento'
@@ -1212,7 +1411,7 @@ export async function getPendingForNudge(
     `${SELECT_PENDENCIA}
        AND r.created_date < NOW() - ($3 || ' hours')::interval
        AND ${HORA_LOCAL_DA_MESA} > NOW() + ($4 || ' hours')::interval
-       AND ${soCasasMarcadas ? CASA_MARCADA : "u.phone IS NOT NULL"}
+       AND ${soCasasMarcadas ? CASA_MARCADA : CLIENTE_ALCANCAVEL}
      ORDER BY r.created_date ASC
      LIMIT 100`,
     [kind, statuses.map(normalizarStatus), String(minAgeHours), String(minHoursAhead)],
@@ -1232,7 +1431,7 @@ export async function getPendingForClose(
 ): Promise<ReminderRow[]> {
   const { rows } = await pool.query(
     `${SELECT_PENDENCIA}
-       AND u.phone IS NOT NULL
+       AND ${CLIENTE_ALCANCAVEL}
        AND r.created_date < NOW() - ($3 || ' hours')::interval
        AND ${HORA_LOCAL_DA_MESA} BETWEEN NOW() + interval '1 hour' AND NOW() + ($4 || ' hours')::interval
      ORDER BY r.booking_date ASC, r.reservation_time ASC NULLS LAST

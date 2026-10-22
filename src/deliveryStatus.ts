@@ -19,7 +19,7 @@
 import { pool } from "./db.js";
 
 export type StatusEntrega = "sent" | "delivered" | "read" | "failed";
-export type DestinatarioEntrega = "cliente" | "estabelecimento";
+export type DestinatarioEntrega = "cliente" | "estabelecimento" | "operador";
 
 const ORDEM: Record<StatusEntrega, number> = { sent: 1, delivered: 2, read: 3, failed: 9 };
 

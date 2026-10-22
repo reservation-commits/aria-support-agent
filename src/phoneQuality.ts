@@ -66,7 +66,14 @@ function ler(entrada: string, pais?: "BR") {
   }
 }
 
-export function avaliarTelefone(bruto: string | null | undefined): AvaliacaoTelefone {
+/**
+ * `paisEsperado` (v22, 2026-10-22, plano C3): o país ISO-2 de quem é o número — para a CASA, o país do
+ * restaurante no catálogo. Resolve a ambiguidade "internacional ou nacional brasileiro" de forma
+ * determinística: em 30 dias, 124 lembretes a casas morreram em "duas leituras válidas (FR/TH ou BR)"
+ * quando o cadastro dizia, na coluna ao lado, que a casa é da França ou da Tailândia. Para o CLIENTE
+ * continua sem país esperado (ele viaja): a ambiguidade segue em quarentena.
+ */
+export function avaliarTelefone(bruto: string | null | undefined, paisEsperado?: string | null): AvaliacaoTelefone {
   const texto = String(bruto ?? "").trim();
   const digitos = texto.replace(/\D/g, "");
   // v18: o "+" na frente é o código do país DECLARADO por quem gravou o número (E.164).
@@ -90,6 +97,16 @@ export function avaliarTelefone(bruto: string | null | undefined): AvaliacaoTele
   const br = !declaradoInternacional && digitos.length >= 10 && digitos.length <= 11 ? ler(digitos, "BR") : null;
 
   if (intl && br) {
+    const esperado = String(paisEsperado ?? "").trim().toUpperCase();
+    const escolhida = esperado === "BR" ? br : esperado && esperado === intl.pais ? intl : null;
+    if (escolhida) {
+      const movel = TIPO_MOVEL.has(escolhida.tipo);
+      return {
+        qualidade: movel ? "ENVIAVEL" : "ENVIAVEL_NAO_MOVEL",
+        e164: escolhida.e164, pais: escolhida.pais, tipo: escolhida.tipo,
+        motivo: `ambiguidade resolvida pelo país do cadastro (${esperado})` + (movel ? "" : ` — linha ${escolhida.tipo}, sem WhatsApp`),
+      };
+    }
     return {
       qualidade: "AMBIGUO_BR", e164: null, pais: intl.pais, tipo: intl.tipo,
       motivo: `duas leituras válidas (${intl.pais} internacional ou BR nacional) — não se adivinha`,

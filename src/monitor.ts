@@ -13,8 +13,10 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import { config } from "./config.js";
-import { logEscalation, pool } from "./db.js";
+import { logEscalation, logEscalationUnica, pool, resolverEscalacoes } from "./db.js";
 import { publish } from "./dashboard/events.js";
+import { alertarOperador } from "./alertaOperador.js";
+import { decidirAlertaIncidente, duracao, estadoInicial, type EstadoIncidente } from "./alertaRegra.js";
 
 const INTERVAL_MS = 5 * 60_000;
 
@@ -70,7 +72,7 @@ async function checkAnthropic(): Promise<{ ok: boolean; latency_ms: number; erro
   }
 }
 
-let ultimoAlertaModelo = 0;
+let incidenteModelo: EstadoIncidente = estadoInicial();
 const ultimoAlertaFerramenta = new Map<string, number>();
 
 /**
@@ -145,14 +147,60 @@ async function runHealthCheck(): Promise<void> {
 
   await checkFerramentasQuebradas();
 
-  // Modelo inacessível = a Aria está muda. Escalação URGENTE (dedup 1h) — é o que faltou em 18/09.
-  if (!ai.ok && Date.now() - ultimoAlertaModelo > 3_600_000) {
-    ultimoAlertaModelo = Date.now();
-    await logEscalation({
+  await tratarSaudeDoModelo(ai.ok, ai.erro);
+}
+
+/** Os dois resumos que dizem "o modelo está fora" — o do monitor e o do turno que falhou (claude.ts). */
+export const PREFIXOS_MODELO_FORA = ["[monitor] modelo da Anthropic inacessível", "[claude] modelo indisponível"];
+
+/**
+ * Modelo inacessível = a Aria está muda. v20, depois das 70 horas de 02 a 05/10/2026:
+ *   - UMA escalação por incidente (o painel recebeu 76 do mesmo fato com o dedup de 1 h);
+ *   - quando o modelo volta, o monitor fecha a escalação sozinho, com a duração na nota;
+ *   - o operador é avisado NO CELULAR na segunda checagem seguida em falha (10 min), de novo a
+ *     cada OPERATOR_ALERT_REPEAT_HOURS enquanto durar, e uma vez na volta.
+ */
+async function tratarSaudeDoModelo(ok: boolean, erro: string | undefined): Promise<void> {
+  const agora = Date.now();
+  const antes = incidenteModelo;
+  const { acao, estado } = decidirAlertaIncidente(antes, ok, agora, {
+    falhasParaAbrir: 2,
+    repetirMs: Math.max(0, config.operatorAlert.repeatHours) * 3_600_000,
+  });
+  incidenteModelo = estado;
+
+  if (!ok) {
+    const credito = /credit balance/i.test(erro ?? "");
+    await logEscalationUnica({
       tag: "URGENTE",
-      summary: `[monitor] modelo da Anthropic inacessível — a Aria NÃO responde a ninguém enquanto isto durar. Erro: ${ai.erro ?? "desconhecido"}. Se for crédito, recarregar em console.anthropic.com.`,
-      phone: "",
+      summary: `[monitor] modelo da Anthropic inacessível — a Aria NÃO responde a ninguém enquanto isto durar. Erro: ${erro ?? "desconhecido"}. Se for crédito, recarregar em console.anthropic.com.`,
+      prefixos: PREFIXOS_MODELO_FORA,
     }).catch(() => {});
+    if (acao === "avisar_queda" || acao === "repetir_queda") {
+      const ha = duracao(agora - (estado.abertoEm ?? agora));
+      await alertarOperador({
+        sistema: "Aria (atendimento)",
+        situacao: acao === "avisar_queda"
+          ? `Modelo de IA fora do ar${credito ? " por falta de crédito na Anthropic" : ""}. A Aria não responde clientes até voltar.`
+          : `Modelo de IA continua fora do ar há ${ha}${credito ? " (falta de crédito na Anthropic)" : ""}. A Aria segue sem responder clientes.`,
+        evento: acao === "avisar_queda" ? "queda" : "repeticao",
+      });
+    }
+    return;
+  }
+
+  // Voltou: fecha o que estiver aberto deste incidente (inclusive de antes de um redeploy).
+  const fechadas = await resolverEscalacoes(PREFIXOS_MODELO_FORA, `modelo voltou a responder em ${new Date(agora).toISOString()} (fechada pelo monitor)`)
+    .catch(() => ({ fechadas: 0, desde: null as Date | null }));
+  const desde = antes.abertoEm ?? fechadas.desde?.getTime() ?? null;
+  // Avisa a volta se avisou a queda — ou se herdou de outro processo uma queda de mais de 10 min.
+  const herdouQueda = antes.ultimoAviso === null && fechadas.fechadas > 0 && desde !== null && agora - desde >= 10 * 60_000;
+  if (acao === "avisar_volta" || herdouQueda) {
+    await alertarOperador({
+      sistema: "Aria (atendimento)",
+      situacao: `Modelo de IA voltou a responder${desde ? `, depois de ${duracao(agora - desde)} fora` : ""}. As mensagens de WhatsApp recebidas nesse intervalo estão sendo reprocessadas.`,
+      evento: "volta",
+    });
   }
 }
 

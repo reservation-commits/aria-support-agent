@@ -16,7 +16,7 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import { config } from "./config.js";
-import { logEscalation, pool } from "./db.js";
+import { logEscalationUnica, pool } from "./db.js";
 
 import { RUBRICA, NOTA_MINIMA, PROMPT_JUIZ, interpretarVeredito, resumirVereditos, promptPara, type Destinatario } from "./juizRegua.js";
 import type { Criterio, Veredito, ResumoJulgamento } from "./juizRegua.js";
@@ -136,10 +136,11 @@ export async function rodarJuiz(): Promise<ResumoJulgamento | null> {
     // Falhar alto: sem veredito legível, nada é gravado e o operador fica sabendo.
     const msg = err instanceof Error ? err.message : String(err);
     console.error("[juiz] julgamento falhou:", msg);
-    await logEscalation({
-      tag: "ALTA",
+    // v22: uma escalação por incidente (não uma por dia enquanto durar) — e esta é acionável: alguém olha o modelo/crédito.
+    await logEscalationUnica({
+      tag: "URGENTE",
       summary: `[juiz] a autoavaliação diária NÃO rodou (${pares.length} respostas sem nota). Erro: ${msg.slice(0, 160)}`,
-      phone: "",
+      prefixos: ["[juiz] a autoavaliação diária NÃO rodou"],
     }).catch(() => {});
     return null;
   }
@@ -159,16 +160,15 @@ export async function rodarJuiz(): Promise<ResumoJulgamento | null> {
       (faltando ? ` · sem veredito ${faltando}` : ""),
   );
 
+  // v22 (plano B4): nota reprovada é TELEMETRIA — mora em aria_quality_scores, aparece no painel e na
+  // Sentinela (aria_qualidade_ok); não abre mais escalação (a fila é só do que exige uma pessoa).
   if (resumo.reprovadas > 0) {
-    await logEscalation({
-      tag: "ALTA",
-      summary:
-        `[juiz] ${resumo.reprovadas} de ${resumo.total} respostas das últimas 24h reprovaram na régua do ADR-015` +
+    console.warn(
+      `[juiz] ${resumo.reprovadas} de ${resumo.total} reprovaram na régua do ADR-015` +
         (resumo.prazos ? ` (${resumo.prazos} com prazo prometido)` : "") +
         (resumo.idioma ? ` (${resumo.idioma} em idioma errado)` : "") +
-        `. Mensagens: ${resumo.ids_reprovadas.join(", ")}. Motivos em aria_quality_scores.`,
-      phone: "",
-    }).catch(() => {});
+        ` — mensagens ${resumo.ids_reprovadas.join(", ")}; motivos em aria_quality_scores`,
+    );
   }
   return resumo;
 }

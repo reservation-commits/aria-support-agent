@@ -40,6 +40,13 @@ import { publish } from "./dashboard/events.js";
 import { registrarSaida, type OrigemSaida, type RegistroSaida } from "./outboundLog.js";
 import { registrarMensagemEnviada } from "./deliveryStatus.js";
 import { avaliarTelefone, podeReceberWhatsApp } from "./phoneQuality.js";
+import { enviarEmailProativo } from "./emailChannel.js";
+import { outboundGate } from "./format.js";
+import { cartaPendencia, idiomaDaCarta, type TipoCartaPendencia } from "./pendenciaEmail.js";
+import type { BaseLang } from "./locale.js";
+
+// v22 (plano B3): país de referência para formatar data e hora na carta por e-mail, a partir do idioma.
+const PAIS_DO_IDIOMA: Record<BaseLang, string> = { en: "GB", pt: "PT", es: "ES", fr: "FR", it: "IT", de: "DE" };
 
 const KIND = "2h";
 const KIND_REVIEW = "6h_review";
@@ -86,13 +93,51 @@ async function enviarLote(p: {
    * e fuso inválido continuam sem marca, para a próxima varredura tentar de novo.
    */
   marcarNaoEnviaveis?: boolean;
+  /**
+   * v22 (planos B2/B3): quando o WhatsApp não é possível (sem telefone, telefone inválido, sem opt-in),
+   * a MESMA mensagem sai pelo e-mail do pedido. Só para as cartas de pendência (pending_nudge, pending_close):
+   * em 30 dias, 168 tentativas morreram em "sem_opt_in" e o cliente ficou sem saber que a mesa não estava confirmada.
+   */
+  emailFallback?: boolean;
 }): Promise<void> {
   let enviados = 0;
+  let enviadosEmail = 0;
   let falhas = 0;
   const semFuso: string[] = [];
   const nomeTemplate = (r: ReminderRow) => (typeof p.template === "function" ? p.template(r) : p.template);
   const encerrar = async (r: ReminderRow, to = "") => {
     if (p.marcarNaoEnviaveis) await markReminderSent(r.reservation_code, p.kind, to).catch(() => {});
+  };
+  const tipoCarta = p.kind === "pending_nudge" || p.kind === "pending_close" ? (p.kind as TipoCartaPendencia) : null;
+  const porEmail = async (r: ReminderRow, motivoWhatsApp: string): Promise<boolean> => {
+    if (!p.emailFallback || !tipoCarta || !config.email.enabled) return false;
+    const to = String(r.customer_email ?? "").trim().toLowerCase();
+    if (!to.includes("@")) return false;
+    // Idioma do CLIENTE (preferência registrada ou país do telefone), nunca o do restaurante.
+    const idioma = idiomaDaCarta({ phone: r.customer_phone });
+    const pais = PAIS_DO_IDIOMA[idioma];
+    const dados = { nome: firstName(r.customer_name), restaurante: r.restaurant_name ?? "", data: formatarData(r.booking_date, pais), hora: formatarHora(r.reservation_time, pais) };
+    if (!dados.restaurante || !dados.data || !dados.hora) return false; // cai no registro "dados_insuficientes" do chamador
+    const carta = cartaPendencia(tipoCarta, idioma, dados);
+    // A mesma porta de saída dos dois canais (ADR-015): texto fixo, mas a trava é código, não confiança.
+    const portao = outboundGate(carta.corpo);
+    if (!portao.ok) {
+      await registrarSaida({ origem: p.origem, evento: `${p.kind}:email`, reservationCode: r.reservation_code, template: "email", locale: idioma, desfecho: "retida_portao", motivo: portao.motivo });
+      return false;
+    }
+    const ok = await enviarEmailProativo(
+      { to, subject: carta.assunto, threadId: null, messageIdHeader: null, references: null, gmailMessageId: null, mailbox: config.email.address },
+      carta.corpo,
+      idioma === "de" ? "en" : idioma, // a moldura HTML do e-mail ainda não tem alemão; o texto da carta vai em alemão
+    );
+    if (!ok) {
+      await registrarSaida({ origem: p.origem, evento: `${p.kind}:email`, reservationCode: r.reservation_code, template: "email", locale: idioma, desfecho: "falha_envio", motivo: `WhatsApp: ${motivoWhatsApp}; e-mail: envio falhou` });
+      return false;
+    }
+    await markReminderSent(r.reservation_code, p.kind, `email:${to}`).catch(() => {});
+    enviadosEmail++;
+    await registrarSaida({ origem: p.origem, evento: `${p.kind}:email`, reservationCode: r.reservation_code, template: "email", locale: idioma, desfecho: "enviado", motivo: `WhatsApp impossível (${motivoWhatsApp}); carta pelo e-mail do pedido` });
+    return true;
   };
 
   // Todo desfecho é registrado, inclusive o não-envio: é ele que diz, no
@@ -109,6 +154,7 @@ async function enviarLote(p: {
 
   for (const r of p.rows) {
     if (!r.customer_phone) {
+      if (await porEmail(r, "sem telefone")) continue;
       await anotar("sem_telefone", r, { motivo: "cliente sem telefone cadastrado" });
       await encerrar(r);
       continue;
@@ -127,6 +173,7 @@ async function enviarLote(p: {
     // seria "normalizado" e entregue a um estranho — com nome, restaurante e data do cliente.
     const tel = avaliarTelefone(r.customer_phone);
     if (!podeReceberWhatsApp(tel)) {
+      if (await porEmail(r, tel.motivo)) continue;
       await anotar("telefone_nao_enviavel", r, { qualidadeTelefone: tel.qualidade, pais: tel.pais, motivo: tel.motivo });
       await encerrar(r);
       continue;
@@ -134,6 +181,8 @@ async function enviarLote(p: {
     const to = tel.e164;
     const consent = await podeReceberWhatsAppReservas(to); // opt-in (2026-09-25)
     if (!consent.ok) {
+      // Opt-out explícito ("PARAR") vale para todo canal proativo; sem opt-in ou número sem WhatsApp → e-mail.
+      if (consent.motivo !== "opt_out" && (await porEmail(r, DETALHE_CONSENTIMENTO[consent.motivo]))) continue;
       await anotar(consent.motivo, r, { qualidadeTelefone: tel.qualidade, pais: tel.pais, motivo: DETALHE_CONSENTIMENTO[consent.motivo] });
       await encerrar(r, to);
       continue;
@@ -169,6 +218,7 @@ async function enviarLote(p: {
   }
 
   if (enviados > 0) console.log(`[${p.rotulo}] ${enviados} envio(s) '${p.kind}' concluído(s)`);
+  if (enviadosEmail > 0) console.log(`[${p.rotulo}] ${enviadosEmail} carta(s) '${p.kind}' por e-mail (WhatsApp impossível)`);
 
   if (falhas > 0) {
     await reportarFalha(
@@ -211,6 +261,9 @@ async function sweep(): Promise<void> {
       r.restaurant_name ?? "",
       formatarHora(r.reservation_time, pais),
     ],
+    // v20: a janela dura 1 h e a varredura passa 3 vezes — quem não pode receber gravava 3 linhas
+    // iguais. A marca fecha na primeira; o opt-in do cliente a reabre (reabrirLembretesDoCliente).
+    marcarNaoEnviaveis: true,
   });
 }
 
@@ -251,6 +304,7 @@ async function sweepBriefing(): Promise<void> {
       ...(comMapa(r) ? [enderecoParaFicha(r.address)] : []),
     ],
     botaoUrl: (r) => (comMapa(r) ? consultaMapa(r.restaurant_name, r.city) : undefined),
+    marcarNaoEnviaveis: true, // v20: idem ao lembrete de 2 h
   });
 }
 
@@ -287,6 +341,7 @@ async function sweepPendingNudge(): Promise<void> {
     evento: (locale) => `pending_nudge_${locale}`,
     corpo: corpoPendencia,
     marcarNaoEnviaveis: true,
+    emailFallback: true,
   });
 }
 
@@ -313,6 +368,7 @@ async function sweepPendingClose(): Promise<void> {
     evento: (locale) => `pending_close_${locale}`,
     corpo: corpoPendencia,
     marcarNaoEnviaveis: true,
+    emailFallback: true,
   });
 }
 
@@ -341,6 +397,7 @@ async function sweepReview(): Promise<void> {
     template: config.review.template,
     evento: (locale) => `review_invite_${locale}`,
     corpo: (r) => [firstName(r.customer_name), r.restaurant_name ?? ""],
+    marcarNaoEnviaveis: true, // v20: idem ao lembrete de 2 h
   });
 }
 

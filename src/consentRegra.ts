@@ -35,3 +35,16 @@ export const DETALHE_CONSENTIMENTO: Record<MotivoConsentimento, string> = {
   opt_out: "pediu para não receber",
   indisponivel: "número sem WhatsApp (a Meta devolveu 'undeliverable') — bloqueado até correção",
 };
+
+/** v20 — por que a casa ficou sem destinatário (pura: recebe as linhas de consentimento da casa). */
+export function explicarSemDestinatario(
+  linhas: Array<{ whatsapp_reservas: boolean; outbound_opted_out: boolean; whatsapp_indisponivel?: boolean | null }>,
+  noRegistroDeOptOut: boolean,
+): string {
+  if (noRegistroDeOptOut) return "casa no Registro de Opt-out de Listagem — nenhum contato";
+  const marcadas = linhas.filter((l) => l.whatsapp_reservas);
+  if (marcadas.length === 0) return "nenhum número da casa marcado para receber";
+  if (marcadas.every((l) => l.outbound_opted_out)) return "a casa pediu para não receber (PARAR)";
+  if (marcadas.every((l) => l.outbound_opted_out || l.whatsapp_indisponivel)) return "número da casa na lista de bloqueio (sem WhatsApp) — aguardando correção";
+  return "nenhum número da casa disponível para receber";
+}

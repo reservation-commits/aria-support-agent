@@ -104,7 +104,8 @@ export async function revisarResposta(p: {
     console.warn("[revisao] revisor semântico indisponível — valendo só as regras:", msg);
     if (Date.now() - ultimoAvisoRevisor > 3_600_000) {
       ultimoAvisoRevisor = Date.now();
-      await logEscalation({ tag: "ALTA", summary: `[revisao] revisor semântico indisponível (${msg.slice(0, 120)}) — respostas saindo só com a porta de regras`, phone: "" }).catch(() => {});
+      // v22 (plano B4): telemetria, não escalação — o monitor já vigia o modelo; aqui só o registro no console e no painel.
+      console.warn(`[revisao] revisor semântico indisponível (${msg.slice(0, 120)}) — respostas saindo só com a porta de regras`);
     }
     await registrar({ chatId: p.chatId, channel: p.channel, tentativa: p.tentativa, aprovado: true, origem: "regra", motivos: ["revisor indisponível"], snippet: p.resposta });
     return { ok: true, semRevisor: true };

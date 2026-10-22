@@ -39,7 +39,17 @@ import { startCompromissos } from "./compromissos.js";
 import { startReservationWatch } from "./watcher.js";
 import { avisoSeEstabelecimento } from "./venueIdentity.js";
 import { atualizarStatusEntrega, motivoBloqueio } from "./deliveryStatus.js";
-import { marcarWhatsAppIndisponivel, limparWhatsAppIndisponivel } from "./db.js";
+import { marcarWhatsAppIndisponivel, limparWhatsAppIndisponivel, logEscalationUnica, reabrirLembretesDoCliente, fecharEscalacoesTelemetria } from "./db.js";
+import { DIAS_VENCIMENTO, PREFIXOS_TELEMETRIA, PREFIXOS_VENCEM } from "./escalacaoRegra.js";
+
+// v22 (plano B4): na subida, a fila de escalação volta a ser fila — fecha com nota o que é telemetria ou venceu.
+function limparFilaDeEscalacao(): void {
+  void fecharEscalacoesTelemetria([...PREFIXOS_TELEMETRIA], [...PREFIXOS_VENCEM], DIAS_VENCIMENTO)
+    .then((n) => { if (n) console.log(`[escalacoes] ${n} escalação(ões) fechada(s) como telemetria/vencida (B4)`); })
+    .catch((err) => console.warn("[escalacoes] limpeza da fila falhou:", err instanceof Error ? err.message : err));
+}
+import { tratarPedidoAcompanhamento } from "./optIn.js";
+import { alertaDeBoot, alertaOperadorLigado } from "./alertaOperador.js";
 import { registrarSaida } from "./outboundLog.js";
 import { parsePayloadEvento } from "./eventFormat.js";
 import { avaliarTelefone, podeReceberWhatsApp } from "./phoneQuality.js";
@@ -119,10 +129,40 @@ app.get("/health", (_req, res) => {
       avaliacao: config.review.enabled && !!config.review.template,
       pendenteCliente24h: !!config.pendingNudge.template,
       encerramentoHonesto: !!config.pendingClose.template,
+      // v22: as cartas de pendência saem por e-mail quando o WhatsApp não é possível (exige o canal de e-mail ligado).
+      pendenciaPorEmail: config.email.enabled,
       pedidoNovoCasa: config.reservationEvents.enabled && !!config.reservationEvents.venueTemplates.pedido_recebido,
       lembreteCasa24h: !!config.venueNudge.template,
       vesperaCasa: config.venueBriefing.enabled && !!config.venueBriefing.template,
       agendaCasa: !!config.venueAgenda.template,
+      alertaOperador: alertaOperadorLigado(),
+    },
+    // v20: os NOMES dos templates, os idiomas e o teto que este container carregou. Em 05/10 duas
+    // variáveis apontavam para templates que só existiam num idioma e ninguém via de fora; com
+    // isto a Sentinela compara com o que está aprovado na Meta. Nome de template não é segredo.
+    notificacoes: {
+      idiomas: config.reminders.locales,
+      idiomaPadrao: config.reminders.defaultLocale,
+      tetoDiario: config.reservationEvents.dailyCap,
+      templates: {
+        recebido: config.reservationEvents.templates.pedido_recebido,
+        aceito: config.reservationEvents.templates.aceito,
+        recusado: config.reservationEvents.templates.recusado,
+        cancelado: config.reservationEvents.templates.cancelado,
+        reagendamento: config.reservationEvents.templates.reagendamento_proposto,
+        lembrete2h: config.reminders.enabled ? config.reminders.template : "",
+        vespera: config.briefing.enabled ? config.briefing.template : "",
+        vesperaMapa: config.briefing.enabled ? config.briefing.templateMap : "",
+        avaliacao: config.review.enabled ? config.review.template : "",
+        pendente24h: config.pendingNudge.template,
+        encerramento: config.pendingClose.template,
+        casaRecebido: config.reservationEvents.venueTemplates.pedido_recebido ?? "",
+        casaCancelado: config.reservationEvents.venueTemplates.cancelado ?? "",
+        casaLembrete: config.venueNudge.template,
+        casaVespera: config.venueBriefing.enabled ? config.venueBriefing.template : "",
+        casaAgenda: config.venueAgenda.template,
+        alertaOperador: config.operatorAlert.template,
+      },
     },
   });
 });
@@ -282,7 +322,11 @@ app.post("/webhook/consent", (req, res) => {
     source: typeof b.source === "string" ? b.source.slice(0, 40) : "webhook",
     motivo: typeof b.motivo === "string" ? b.motivo.slice(0, 200) : null,
   })
-    .then(() => res.json({ ok: true, phone_pais: tel.pais, tipo, whatsapp_reservas: b.whatsapp_reservas, idioma }))
+    .then(async () => {
+      // v20: quem acabou de ser marcado volta a ter os lembretes das mesas de hoje em diante.
+      if (b.whatsapp_reservas === true && tipo === "cliente") await reabrirLembretesDoCliente({ phone: tel.e164 }).catch(() => 0);
+      res.json({ ok: true, phone_pais: tel.pais, tipo, whatsapp_reservas: b.whatsapp_reservas, idioma });
+    })
     .catch((err) => {
       console.error("[consent] gravação falhou", err);
       res.status(500).json({ ok: false, motivo: "erro", detalhe: "falha interna" });
@@ -413,6 +457,18 @@ async function handleMessage(payload: WhatsAppWebhookPayload): Promise<void> {
 async function tratarStatusEntrega(s: DeliveryStatus): Promise<void> {
   const avanco = await atualizarStatusEntrega({ messageId: s.id, status: s.status, errorTitle: s.errorTitle });
   const bloqueio = motivoBloqueio(s);
+  // v20: falha de uma NOTIFICAÇÃO que não é "número sem WhatsApp" (template inexistente no idioma,
+  // limite da Meta, janela de 24 h) ia só para o console. Vira escalação — uma por código de erro
+  // enquanto estiver aberta, com o template e a reserva de origem.
+  if (s.status === "failed" && !bloqueio && avanco.resultado === "atualizado") {
+    const cabeca = `[entrega] a Meta recusou a entrega de uma notificação — código ${s.errorCode ?? "?"}`;
+    await logEscalationUnica({
+      tag: "ALTA",
+      summary: `${cabeca} (${s.errorTitle ?? "sem detalhe"}). Template '${avanco.template ?? "?"}', destinatário ${avanco.destinatario ?? "?"}, reserva ${avanco.reservationCode ?? "?"}. Enquanto esta escalação estiver aberta, novas falhas com o mesmo código não abrem outra.`,
+      prefixos: [cabeca],
+      reservationCode: avanco.reservationCode,
+    }).catch(() => {});
+  }
   if (!bloqueio || !s.recipient) return;
   const telefone = "+" + s.recipient.replace(/\D/g, "");
   try {
@@ -494,6 +550,16 @@ async function handleOneMessage(parsed: ParsedMessage): Promise<void> {
       void logMessage({ chatId: parsed.chatId, pushName: parsed.pushName, direction: "outbound", content: msg });
     }
     return; // não passa para o agente — foi um comando de consentimento
+  }
+
+  // v20: o cliente pede para acompanhar o pedido pelo WhatsApp (botão do e-mail). Determinístico:
+  // o opt-in é gravado e confirmado mesmo com o modelo fora do ar. Se não for isso, segue a conversa.
+  const optIn = await tratarPedidoAcompanhamento(parsed.chatId, inboundText);
+  if (optIn.tratado) {
+    if (optIn.resposta && (await sendText(parsed.chatId, optIn.resposta))) {
+      void logMessage({ chatId: parsed.chatId, pushName: parsed.pushName, direction: "outbound", content: optIn.resposta });
+    }
+    return;
   }
 
   // Enfileira o conteúdo. Mensagens em rajada do mesmo número são agrupadas num
@@ -701,6 +767,7 @@ app.listen(config.port, async () => {
       // Semeia o teto diário de custo com o que já foi gasto hoje (restart-safe).
       void seedCostGuard();
       // Inicia serviços autônomos somente após migrations garantidas.
+      limparFilaDeEscalacao();
       startMonitor();
       startTester();
       startWhatsAppReplay();
@@ -714,12 +781,14 @@ app.listen(config.port, async () => {
       startDedupCleanup();
       startEmbeddingsSync();
       startAlerts();
+      void alertaDeBoot(); // v21: autoteste do alerta ao operador
     })
     .catch((err) => {
       console.error("[aria] dashboard migrations failed (continuing without):", err);
       void detectUnaccent();
       void seedCostGuard();
       // Inicia mesmo assim — os serviços tratam falhas internamente.
+      limparFilaDeEscalacao();
       startMonitor();
       startTester();
       startWhatsAppReplay();
@@ -733,5 +802,6 @@ app.listen(config.port, async () => {
       startDedupCleanup();
       startEmbeddingsSync();
       startAlerts();
+      void alertaDeBoot(); // v21: autoteste do alerta ao operador
     });
 });

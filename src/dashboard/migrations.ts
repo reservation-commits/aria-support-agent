@@ -225,6 +225,16 @@ export async function runDashboardMigrations(): Promise<void> {
         ADD COLUMN IF NOT EXISTS indisponivel_motivo   TEXT,
         ADD COLUMN IF NOT EXISTS indisponivel_em       TIMESTAMPTZ;
     `);
+    // v20 (fundador, 2026-10-05): o cliente pede o acompanhamento pelo WhatsApp e o número que
+    // escreveu fica ligado a ele. As consultas de envio preferem esse número ao telefone da conta.
+    await client.query(`
+      ALTER TABLE public.aria_contact_consent
+        ADD COLUMN IF NOT EXISTS customer_id TEXT;
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS aria_contact_consent_customer_idx
+        ON public.aria_contact_consent (customer_id) WHERE customer_id IS NOT NULL;
+    `);
 
     // Avaliações de experiência (pós-visita). Guardadas até serem publicadas
     // na página do estabelecimento na plataforma (posted_to_platform).

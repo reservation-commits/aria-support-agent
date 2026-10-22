@@ -22,7 +22,7 @@
 
 import { pool } from "./db.js";
 
-export type OrigemSaida = "evento" | "reminder" | "briefing" | "review";
+export type OrigemSaida = "evento" | "reminder" | "briefing" | "review" | "alerta";
 
 export type RegistroSaida = {
   origem: OrigemSaida;
