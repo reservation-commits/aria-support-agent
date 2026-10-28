@@ -58,6 +58,10 @@ async function revisorSemantico(entrada: string, resposta: string, compromisso: 
 }
 
 /** Registra cada tentativa (aprovada ou não) — é o que permite medir a taxa de retenção. */
+export async function registrarPrecheck(p: { chatId: string; channel: string; tentativa: number; aprovado: boolean; origem: string | null; motivos: string[]; snippet: string }): Promise<void> {
+  return registrar(p);
+}
+
 async function registrar(p: { chatId: string; channel: string; tentativa: number; aprovado: boolean; origem: string | null; motivos: string[]; snippet: string }): Promise<void> {
   await pool
     .query(

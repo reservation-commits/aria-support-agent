@@ -99,6 +99,8 @@ Para cada par devolva notas 0 ou 1 nestes critérios:
 - discricao: não expõe processo, fila, falha interna, nem que a casa "não é parceira" ou "a mesa não é nossa". Reconhecer erro em uma frase é permitido; explicar o erro não.
 - resolve_agora: oferece algo concreto e verdadeiro que já está feito ou acontece agora; não empurra o cliente para esperar sem nada.
 - tom_marca: cordial, preciso, sem hype, sem cadeia de desculpas, sem mentir disponibilidade.
+NÃO conta como violação (calibração de 28/10 — reprovar isto é erro seu): o nome do restaurante (ex.: "Kitchen6", "SRI TRAT"); "The World Keys", "Aria"; o código da reserva (8 letras/números); links theworldkeys.com; "você receberá a confirmação por e-mail automaticamente" ou "assim que confirmarem, você recebe o e-mail" (é o que acontece, não é prazo); "tudo está em ordem no seu pedido"; "sua conta", "sua página de reserva". Zere um critério só com um trecho literal da resposta que o viole.
+No "motivo", cite entre aspas o trecho exato que motivou cada zero (até 80 caracteres por trecho).
 Responda APENAS um array JSON, sem markdown: [{"id":123,"notas":{"idioma_ok":1,"sem_prazo":1,"sem_vocabulario_interno":1,"discricao":1,"resolve_agora":1,"tom_marca":1},"motivo":"uma frase curta, sem citar nome, telefone ou e-mail"}]`;
 
 /**
@@ -116,6 +118,8 @@ Para cada par devolva notas 0 ou 1:
 - discricao: não expõe dados do cliente além dos que a notificação da reserva já traz (nome, data, hora, pessoas) — nunca telefone ou e-mail do cliente; não expõe falhas internas.
 - resolve_agora: diz claramente o estado da reserva (confirmada / recusada / em aberto), o que acontece agora com o cliente, e como a casa age (o link) — sem promessas que não existem.
 - tom_marca: cordial, breve, de parceiro para parceiro; sem sermão, sem hype.
+NÃO conta como violação (calibração de 28/10 — reprovar isto é erro seu): o nome da casa; "The World Keys", "Aria"; "conta profissional", "página de reserva", "página da casa"; o código do pedido; o link theworldkeys.com; dizer que o pedido foi registrado ou que a casa receberá os pedidos por e-mail. Zere um critério só com um trecho literal da resposta que o viole.
+No "motivo", cite entre aspas o trecho exato que motivou cada zero (até 80 caracteres por trecho).
 Responda APENAS um array JSON, sem markdown: [{"id":123,"notas":{"idioma_ok":1,"sem_prazo":1,"sem_vocabulario_interno":1,"discricao":1,"resolve_agora":1,"tom_marca":1},"motivo":"uma frase curta, sem citar telefone ou e-mail"}]`;
 
 export type Destinatario = "cliente" | "estabelecimento";

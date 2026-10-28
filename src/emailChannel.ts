@@ -27,6 +27,8 @@ import { config } from "./config.js";
 import { responderComRevisao } from "./entrega.js";
 import { identificarEstabelecimentoPorEmail } from "./venueIdentity.js";
 import { pareceNotificacaoDeReserva } from "./venueIdentityRegra.js";
+import { detectarAvisoOperacional, prefixoAviso, resumoAviso } from "./avisoOperacional.js";
+import { logEscalationAcionavel } from "./db.js";
 import { emailChatId, emailIdentity } from "./identity.js";
 import { getOrRestoreHistory, setHistory } from "./sessions.js";
 import { enqueueMessage, isBusy } from "./conversationQueue.js";
@@ -534,6 +536,22 @@ async function processEmailTurn(
       },
     ],
   };
+
+  // v24 (ADR-019): aviso operacional de um SISTEMA DE RESERVAS (cartão exigido com prazo) não é ruído nem
+  // conversa: vira escalação acionável com o prazo — cartão/pagamento é ação humana — e nenhuma resposta
+  // vai ao remetente automático. Caso Pierluigi/SevenRooms, 28/10: a Aria silenciou e a mesa quase caiu.
+  const aviso = detectarAvisoOperacional({ sender: ctx.to, subject: ctx.subject, text: textFromBlocks(blocks) });
+  if (aviso && aviso.tipo === "cartao_exigido") {
+    await logEscalationAcionavel({ tag: "PEDIDO_ESPECIAL", summary: resumoAviso(aviso), prefixo: prefixoAviso(aviso), dono: "fundador", phone: "" }).catch(() => {});
+    void logScopeBlock({
+      chatId, channel: "email", sender: ctx.to, subject: ctx.subject ?? null, layer: "semantic",
+      reason: `aviso operacional (${aviso.sistema}): cartão exigido${aviso.prazo ? ` até ${aviso.prazo}` : ""} — escalado ao fundador; sem resposta ao endereço automático`,
+      snippet: textFromBlocks(blocks).slice(0, 300),
+    }).catch(() => {});
+    console.warn(`[email] aviso operacional ${aviso.sistema}: ${aviso.tipo} (${aviso.casa ?? "?"}, ${aviso.dataMesa ?? "?"}) → escalação ao fundador`);
+    void clearPendingEmails(chatId).catch(() => {});
+    return;
+  }
 
   // Bloqueio de escopo: newsletter/marketing/relatório automático de serviço
   // contratado → silêncio (registrado no painel). Camada determinística sempre;
