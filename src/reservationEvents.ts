@@ -46,6 +46,7 @@ import { DETALHE_CONSENTIMENTO } from "./consentRegra.js";
 import { publish } from "./dashboard/events.js";
 import { montarParametros, parsePayloadEvento } from "./eventFormat.js";
 import { escolherLocale } from "./templateLocale.js";
+import { temTeto, tetoAtingido } from "./tetoRegra.js";
 import { contarEnviosHoje, registrarSaida, type RegistroSaida } from "./outboundLog.js";
 import { registrarMensagemEnviada } from "./deliveryStatus.js";
 import { avaliarTelefone, podeReceberWhatsApp } from "./phoneQuality.js";
@@ -169,7 +170,7 @@ async function decidir(body: unknown, ctx: Partial<RegistroSaida>): Promise<Resu
 
   // 8 — teto diário do canário. Antes do claim, para um evento barrado pelo
   // teto não queimar a marca de dedup e poder sair amanhã.
-  if (config.reservationEvents.dailyCap > 0) {
+  if (temTeto(config.reservationEvents.dailyCap)) {
     let hoje: number;
     try {
       hoje = await contarEnviosHoje();
@@ -182,7 +183,7 @@ async function decidir(body: unknown, ctx: Partial<RegistroSaida>): Promise<Resu
       );
       return { acao: "teto_diario", detalhe: "contagem do teto indisponível" };
     }
-    if (hoje >= config.reservationEvents.dailyCap) {
+    if (tetoAtingido(hoje, config.reservationEvents.dailyCap)) {
       await registrarFinding(
         `teto diário de ${config.reservationEvents.dailyCap} envios atingido (${hoje} hoje) — ` +
           `evento '${p.event}' da reserva ${p.reservationCode} não enviado${rastro}`,

@@ -40,6 +40,7 @@ import { contarEnviosHoje, registrarSaida, type RegistroSaida } from "./outbound
 import { registrarMensagemEnviada } from "./deliveryStatus.js";
 import { avaliarTelefone, podeReceberWhatsApp } from "./phoneQuality.js";
 import { escolherLocale } from "./templateLocale.js";
+import { temTeto, tetoAtingido } from "./tetoRegra.js";
 import { montarParametrosEstabelecimento, type EventoEstabelecimento } from "./venueFormat.js";
 import { sendTemplate } from "./whatsapp.js";
 
@@ -163,17 +164,20 @@ async function enviarParaCasa(p: {
       return { acao: "dados_insuficientes", detalhe: "faltam campos", destinatarios: destinatarios.length };
     }
 
-    // Teto diário compartilhado com o cliente: um teto é um teto.
-    let hoje: number;
-    try {
-      hoje = await contarEnviosHoje();
-    } catch {
-      await anotar("teto_diario", { motivo: "contagem do teto indisponível" });
-      return { acao: "teto_diario", detalhe: "contagem do teto indisponível" };
-    }
-    if (hoje >= config.reservationEvents.dailyCap) {
-      await anotar("teto_diario", { motivo: `${hoje}/${config.reservationEvents.dailyCap} hoje` });
-      return { acao: "teto_diario", detalhe: `${hoje}/${config.reservationEvents.dailyCap} hoje` };
+    // Teto diário compartilhado com o cliente: um teto é um teto — e 0 é "sem teto", como no cliente
+    // (tetoRegra.ts; até 27/10 a casa comparava direto e, com 0, barrava tudo).
+    if (temTeto(config.reservationEvents.dailyCap)) {
+      let hoje: number;
+      try {
+        hoje = await contarEnviosHoje();
+      } catch {
+        await anotar("teto_diario", { motivo: "contagem do teto indisponível" });
+        return { acao: "teto_diario", detalhe: "contagem do teto indisponível" };
+      }
+      if (tetoAtingido(hoje, config.reservationEvents.dailyCap)) {
+        await anotar("teto_diario", { motivo: `${hoje}/${config.reservationEvents.dailyCap} hoje` });
+        return { acao: "teto_diario", detalhe: `${hoje}/${config.reservationEvents.dailyCap} hoje` };
+      }
     }
 
     const marca = `evt_${p.evento}_venue:${numero}`;

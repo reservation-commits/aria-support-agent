@@ -5,7 +5,8 @@ import { fileURLToPath } from "node:url";
 import type Anthropic from "@anthropic-ai/sdk";
 import { config } from "./config.js";
 import {
-  parseIncoming,
+  listarMensagensBrutas,
+  parseOneMessage,
   extractStatuses,
   type DeliveryStatus,
   type WhatsAppWebhookPayload,
@@ -23,7 +24,7 @@ import { normalizePhone } from "./phone.js";
 import { whatsappIdentity } from "./identity.js";
 import { responderComRevisao } from "./entrega.js";
 import { sendText, markAsReadWithTyping } from "./whatsapp.js";
-import { sanitizeReply } from "./format.js";
+import { sanitizeReply, outboundGate } from "./format.js";
 import { logMessage, logScopeBlock } from "./dashboard/logger.js";
 import { runDashboardMigrations } from "./dashboard/migrations.js";
 import { startMonitor } from "./monitor.js";
@@ -39,7 +40,7 @@ import { startCompromissos } from "./compromissos.js";
 import { startReservationWatch } from "./watcher.js";
 import { avisoSeEstabelecimento } from "./venueIdentity.js";
 import { atualizarStatusEntrega, motivoBloqueio } from "./deliveryStatus.js";
-import { marcarWhatsAppIndisponivel, limparWhatsAppIndisponivel, logEscalationUnica, reabrirLembretesDoCliente, fecharEscalacoesTelemetria } from "./db.js";
+import { marcarWhatsAppIndisponivel, limparWhatsAppIndisponivel, logEscalationUnica, logEscalation, getConsentRow, reabrirLembretesDoCliente, fecharEscalacoesTelemetria } from "./db.js";
 import { DIAS_VENCIMENTO, PREFIXOS_TELEMETRIA, PREFIXOS_VENCEM } from "./escalacaoRegra.js";
 
 // v22 (plano B4): na subida, a fila de escalação volta a ser fila — fecha com nota o que é telemetria ou venceu.
@@ -441,12 +442,38 @@ function startDedupCleanup(): void {
 
 async function handleMessage(payload: WhatsAppWebhookPayload): Promise<void> {
   // A Meta pode agrupar várias mensagens num único webhook — processa todas em ordem.
-  const parsedList = await parseIncoming(payload);
-  for (const parsed of parsedList) {
+  // v23: a dedup por wamid vem ANTES de baixar mídia e transcrever áudio (até 27/10 um webhook
+  // reentregue com áudio pagava o Whisper duas vezes para então ser descartado).
+  for (const { message, value } of listarMensagensBrutas(payload)) {
+    if (!(await mensagemInedita(message.id))) continue;
+    const parsed = await parseOneMessage(message, value).catch((err) => {
+      console.error("[webhook] parse error", err);
+      return null;
+    });
+    if (!parsed) continue;
     await handleOneMessage(parsed).catch((err) =>
       console.error("[webhook] handleOneMessage error", err),
     );
   }
+}
+
+/** Dedup em duas camadas: memória (reenvio em milissegundos) e banco (restart, deploy, réplicas). */
+async function mensagemInedita(messageId: string): Promise<boolean> {
+  if (isDuplicate(messageId)) {
+    console.log(`[webhook] mensagem duplicada ignorada (memória): ${messageId}`);
+    return false;
+  }
+  try {
+    const fresh = await markMessageProcessed(messageId);
+    if (!fresh) {
+      console.log(`[webhook] mensagem duplicada ignorada (banco): ${messageId}`);
+      return false;
+    }
+  } catch (err) {
+    // Falha no dedup persistido não pode travar o atendimento — segue só com o de memória.
+    console.warn("[webhook] dedup persistida indisponível:", err instanceof Error ? err.message : err);
+  }
+  return true;
 }
 
 /**
@@ -494,23 +521,7 @@ async function handleOneMessage(parsed: ParsedMessage): Promise<void> {
     .then((n) => { if (n > 0) console.log(`[bloqueio] número voltou a falar conosco — bloqueio por indisponibilidade removido`); })
     .catch(() => {});
 
-  // Descarta silenciosamente mensagens já processadas.
-  // 1) Cache em memória — caminho rápido para o reenvio em milissegundos.
-  if (isDuplicate(parsed.messageId)) {
-    console.log(`[webhook] mensagem duplicada ignorada (memória): ${parsed.messageId}`);
-    return;
-  }
-  // 2) Dedup persistida — pega reentregas após restart/deploy e múltiplas réplicas.
-  try {
-    const fresh = await markMessageProcessed(parsed.messageId);
-    if (!fresh) {
-      console.log(`[webhook] mensagem duplicada ignorada (banco): ${parsed.messageId}`);
-      return;
-    }
-  } catch (err) {
-    // Falha no dedup persistido não pode travar o atendimento — segue só com o de memória.
-    console.warn("[webhook] dedup persistida indisponível:", err instanceof Error ? err.message : err);
-  }
+  // (a dedup por wamid já aconteceu em handleMessage, antes de qualquer download de mídia)
 
   // Rate limiting — sem resposta ao cliente (não incentiva o abuso).
   if (isRateLimited(parsed.chatId)) {
@@ -543,8 +554,25 @@ async function handleOneMessage(parsed: ParsedMessage): Promise<void> {
   // mensagens curtas e diretas ("PARAR", "stop", "quero parar os lembretes").
   const intent = detectConsentIntent(inboundText);
   if (intent) {
-    void setOutboundConsent(normalizePhone(parsed.chatId), intent === "opt_out", "keyword").catch(() => {});
-    const msg = consentConfirmation(intent, normalizePhone(parsed.chatId));
+    const telefone = normalizePhone(parsed.chatId);
+    // v23: a gravação vem antes da confirmação — "Pronto" só se gravou. Falhou: escalação, sem mentir.
+    try {
+      await setOutboundConsent(telefone, intent === "opt_out", "keyword");
+    } catch (err) {
+      console.warn("[consent] gravação falhou:", err instanceof Error ? err.message : err);
+      void logEscalation({ tag: "ALTA", summary: `[consent] cliente pediu ${intent === "opt_out" ? "PARAR" : "VOLTAR"} e a gravação em aria_contact_consent falhou — registrar à mão e confirmar ao cliente`, phone: telefone }).catch(() => {});
+      return;
+    }
+    // VOLTAR só limpa o PARAR; os lembretes exigem whatsapp_reservas. A confirmação diz a verdade e,
+    // como toda saída, passa pela porta única (até 27/10 era o único texto que não passava).
+    const linha = intent === "opt_in" ? await getConsentRow(telefone).catch(() => null) : null;
+    const msg = consentConfirmation(intent, telefone, intent === "opt_in" ? { recebeReservas: !!linha?.whatsapp_reservas } : {});
+    const porta = outboundGate(msg);
+    if (!porta.ok) {
+      console.warn(`[consent] confirmação retida pela porta de saída (${porta.motivo})`);
+      void logEscalation({ tag: "ALTA", summary: `[consent] confirmação de ${intent} retida pela porta de saída (${porta.motivo}) — o pedido foi gravado, o cliente não recebeu a confirmação`, phone: telefone }).catch(() => {});
+      return;
+    }
     const ok = await sendText(parsed.chatId, msg);
     if (ok) {
       void logMessage({ chatId: parsed.chatId, pushName: parsed.pushName, direction: "outbound", content: msg });

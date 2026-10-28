@@ -23,7 +23,7 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - name: Typecheck
         run: npm run typecheck
-      - name: Testes (169 casos, sem banco e sem modelo)
+      - name: Testes (267 casos, sem banco e sem modelo)
         run: npm test
       - name: Build (o mesmo do Dockerfile)
         run: npm run build

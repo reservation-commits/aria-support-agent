@@ -52,13 +52,31 @@ const MSG_OUT: Record<BaseLang, string> = {
 const MSG_IN: Record<BaseLang, string> = {
   pt: "Perfeito. Você voltará a receber nossos lembretes e convites. É um prazer tê-lo de volta. Aria · The World Keys",
   en: "Perfect. You will receive our reminders and invitations again. A pleasure to have you back. Aria · The World Keys",
-  es: "Perfecto. Volverá a recibir nuestros recordatorios e invitaciones. Es un placer tenerle de vuelta. Aria · The World Keys",
+  es: "Perfecto. Usted volverá a recibir nuestros recordatorios e invitaciones. Es un placer tenerle de vuelta. Aria · The World Keys",
   fr: "Parfait. Vous recevrez à nouveau nos rappels et invitations. Ravis de vous retrouver. Aria · The World Keys",
-  it: "Perfetto. Riceverà di nuovo i nostri promemoria e inviti. È un piacere riaverla con noi. Aria · The World Keys",
+  it: "Perfetto. Lei riceverà di nuovo i nostri promemoria e inviti. È un piacere riaverla con noi. Aria · The World Keys",
   de: "Perfekt. Sie erhalten unsere Erinnerungen und Einladungen wieder. Schön, Sie wieder bei uns zu haben. Aria · The World Keys",
 };
 
-export function consentConfirmation(intent: "opt_out" | "opt_in", phone: string): string {
+// v23 (levantamento 27/10): "VOLTAR" só limpa o PARAR. Os lembretes de reserva exigem a marcação
+// `whatsapp_reservas` (opt-in por código). Para quem nunca a teve, prometer "voltará a receber
+// nossos lembretes" era falso — a confirmação diz o que é verdade e aponta o gesto que liga o canal.
+const MSG_IN_SEM_RESERVAS: Record<BaseLang, string> = {
+  pt: "Pronto. Seu número voltou a poder receber nossas mensagens. Para acompanhar um pedido por aqui, envie o código dele. Aria · The World Keys",
+  en: "Done. Your number can receive our messages again. To follow a request here, send us its code. Aria · The World Keys",
+  es: "Listo. Su número vuelve a poder recibir nuestros mensajes. Para seguir una solicitud por aquí, envíenos su código. Aria · The World Keys",
+  fr: "C'est noté. Votre numéro peut à nouveau recevoir nos messages. Pour suivre une demande ici, envoyez-nous son code. Aria · The World Keys",
+  it: "Fatto. Il suo numero può di nuovo ricevere i nostri messaggi. Per seguire una richiesta qui, ci invii il suo codice. Aria · The World Keys",
+  de: "Erledigt. Ihre Nummer kann unsere Nachrichten wieder empfangen. Um eine Anfrage hier zu verfolgen, senden Sie uns ihren Code. Aria · The World Keys",
+};
+
+export type OpcoesConfirmacao = {
+  /** Só para opt_in: o número está marcado para receber WhatsApp de reservas? Ausente = sim (compatível). */
+  recebeReservas?: boolean;
+};
+
+export function consentConfirmation(intent: "opt_out" | "opt_in", phone: string, opts: OpcoesConfirmacao = {}): string {
   const lang = languageForPhone(phone);
-  return intent === "opt_out" ? MSG_OUT[lang] : MSG_IN[lang];
+  if (intent === "opt_out") return MSG_OUT[lang];
+  return opts.recebeReservas === false ? MSG_IN_SEM_RESERVAS[lang] : MSG_IN[lang];
 }

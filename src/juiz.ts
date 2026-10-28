@@ -42,7 +42,7 @@ async function coletarPares(): Promise<Par[]> {
   const { rows } = await pool.query<{ id: string; chat_id: string; pergunta: string | null; resposta: string; casa: boolean }>(
     `SELECT o.id::text AS id, o.chat_id, o.content AS resposta,
             (EXISTS (SELECT 1 FROM public.db_restaurants d WHERE o.chat_id LIKE 'email:%' AND d.email_for_reservations IS NOT NULL AND lower(d.email_for_reservations) = lower(replace(o.chat_id, 'email:', '')))
-             OR EXISTS (SELECT 1 FROM public.aria_contact_consent c WHERE c.tipo = 'estabelecimento' AND c.phone = o.chat_id)) AS casa,
+             OR EXISTS (SELECT 1 FROM public.aria_contact_consent c WHERE c.tipo = 'estabelecimento' AND c.phone IN (o.chat_id, '+' || o.chat_id))) AS casa,
             (SELECT i.content FROM public.aria_messages i
               WHERE i.chat_id = o.chat_id AND i.direction = 'inbound' AND i.created_at < o.created_at
               ORDER BY i.created_at DESC LIMIT 1) AS pergunta

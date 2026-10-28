@@ -92,17 +92,28 @@ export type ParsedMessage = {
 export async function parseIncoming(
   payload: WhatsAppWebhookPayload,
 ): Promise<ParsedMessage[]> {
-  if (payload.object !== "whatsapp_business_account") return [];
-
   const out: ParsedMessage[] = [];
+  for (const { message, value } of listarMensagensBrutas(payload)) {
+    const parsed = await parseOneMessage(message, value);
+    if (parsed) out.push(parsed);
+  }
+  return out;
+}
+
+export type MensagemBruta = { message: WhatsAppIncomingMessage; value: WebhookChangeValue };
+
+/**
+ * v23: as mensagens do webhook, ainda sem baixar mídia nem transcrever áudio — para a dedup por
+ * wamid acontecer ANTES de qualquer custo (um webhook reentregue com áudio pagava o Whisper duas vezes).
+ */
+export function listarMensagensBrutas(payload: WhatsAppWebhookPayload): MensagemBruta[] {
+  if (payload.object !== "whatsapp_business_account") return [];
+  const out: MensagemBruta[] = [];
   for (const entry of payload.entry ?? []) {
     for (const change of entry.changes ?? []) {
       if (change.field !== "messages") continue;
       const value = change.value;
-      for (const message of value?.messages ?? []) {
-        const parsed = await parseOneMessage(message, value);
-        if (parsed) out.push(parsed);
-      }
+      for (const message of value?.messages ?? []) out.push({ message, value });
     }
   }
   return out;
@@ -112,7 +123,7 @@ type WebhookChangeValue = NonNullable<
   NonNullable<WhatsAppWebhookPayload["entry"]>[number]["changes"]
 >[number]["value"];
 
-async function parseOneMessage(
+export async function parseOneMessage(
   message: WhatsAppIncomingMessage,
   value: WebhookChangeValue,
 ): Promise<ParsedMessage | null> {

@@ -207,7 +207,11 @@ export function motivoDeBloqueio(text: string, opts: OpcoesPortao = {}): string 
   // ser o agente citando um aviso que o cliente recebeu; num texto que não é
   // carta, ela denuncia a nota interna.
   const temSaudacao = /\b(prezad|car[oa]s?|olá|ol[áa]|bom dia|boa tarde|boa noite|dear|hello|hi\b|good (morning|afternoon|evening)|bonjour|bonsoir|cher|chère|estimad|hola|buenos días|buenas|gentile|buongiorno|salve|sehr geehrte|guten tag|hallo)/i.test(t);
-  const temSegundaPessoa = /\b(você|voc[eê]s|seu|sua|seus|suas|lhe|te\b|vos|you|your|yours|vous|votre|vos\b|usted|su\b|tu\b|ihnen|ihre)\b/i.test(t);
+  // "você" termina em letra acentuada: `\b` (ASCII) nunca fecha depois do "ê", e "Você não receberá…"
+  // caía como "anotação" (v23, 27/10) — por isso o lookahead em vez do `\b` final nessa forma.
+  // Formas de tratamento formais de es/it/de (usted, Lei/suo, Sie/Ihr) faltavam: uma confirmação curta nesses
+  // idiomas era "anotação" mesmo falando com o cliente (v23).
+  const temSegundaPessoa = /\b(voc[eê]s?(?![a-z])|(seu|sua|seus|suas|lhe|te|vos|you|your|yours|vous|votre|usted|ustedes|su|sus|tu|suo|suoi|sue|lei|voi|sie|ihnen|ihr|ihre|ihrem|ihren|ihrer|ihres)\b)/i.test(t);
   const pareceCarta = temSaudacao && temSegundaPessoa;
 
   // 3. Meta-raciocínio sobre responder ou não — em 4 idiomas.
