@@ -161,6 +161,8 @@ export const config = {
     venueTemplates: {
       pedido_recebido: process.env.RESERVATION_EVENT_TEMPLATE_VENUE_RECEBIDO ?? "",
       cancelado: process.env.RESERVATION_EVENT_TEMPLATE_VENUE_CANCELADO ?? "",
+      // v25: reserva que nasce já aceita (confirmação automática, ex.: MONAK) → twk_venue_confirmed.
+      confirmada: process.env.RESERVATION_EVENT_TEMPLATE_VENUE_CONFIRMADA ?? "",
     } as Record<string, string>,
   },
 

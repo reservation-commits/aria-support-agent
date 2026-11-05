@@ -49,9 +49,14 @@ test("toYMD não desliza um dia com o Date que o pg devolve", () => {
   assert.equal(toYMD("qualquer coisa"), null);
 });
 
-test("hora segue a convenção do país", () => {
-  assert.match(formatarHora("20:00:00", "US"), /8.*PM/i);
-  assert.equal(formatarHora("20:00:00", "FR").replace(/ | /g, " ").trim(), "20:00");
+test("hora sempre em AM/PM, em todo país (v25, decisão do fundador 05/11)", () => {
+  assert.equal(formatarHora("20:00:00", "US"), "8:00 PM");
+  assert.equal(formatarHora("20:00:00", "FR"), "8:00 PM");
+  assert.equal(formatarHora("20:30", "BR"), "8:30 PM");
+  assert.equal(formatarHora("09:05:00", null), "9:05 AM");
+  assert.equal(formatarHora("00:15:00", "FR"), "12:15 AM");
+  assert.equal(formatarHora("12:00:00", "FR"), "12:00 PM");
+  assert.equal(formatarHora("25:00", "FR"), "");
   assert.equal(formatarHora("lixo", "FR"), "");
   assert.equal(formatarHora(null, "FR"), "");
 });

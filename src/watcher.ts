@@ -58,14 +58,15 @@ async function gravar(code: string, status: string, mudou: boolean): Promise<voi
   );
 }
 
-async function disparar(evento: EventoReserva, code: string): Promise<void> {
+async function disparar(evento: EventoReserva, code: string, novaJaAceita: boolean): Promise<void> {
   const body = { event: evento, reservation_code: code, trace_id: `watch-${Date.now().toString(36)}` };
   const cliente = await tratarEventoReserva(body);
   let casa = "—";
   const p = parsePayloadEvento(body);
   if (p) {
     const linha = await getReservationForEvent(p.reservationCode).catch(() => null);
-    const r = await notificarEstabelecimento(p, linha).catch((err) => {
+    // v25: reserva nova já aceita (confirmação automática) → a casa recebe "reserva confirmada".
+    const r = await notificarEstabelecimento(p, linha, { novaJaAceita }).catch((err) => {
       console.error("[watch] estabelecimento falhou:", err instanceof Error ? err.message : err);
       return { acao: "falha_envio", detalhe: "falha interna" };
     });
@@ -106,7 +107,7 @@ export async function varrerReservas(): Promise<{ eventos: number }> {
     if (eventos >= MAX_EVENTOS_POR_TICK) continue; // o resto sai na próxima varredura (a foto já mudou; a dedup protege)
     eventos++;
     try {
-      await disparar(evento, r.reservation_code);
+      await disparar(evento, r.reservation_code, anterior === null && evento === "aceito");
     } catch (err) {
       console.error(`[watch] falha ao disparar ${evento} para ${r.reservation_code}:`, err instanceof Error ? err.message : err);
     }

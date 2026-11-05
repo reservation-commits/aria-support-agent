@@ -133,6 +133,7 @@ app.get("/health", (_req, res) => {
       // v22: as cartas de pendência saem por e-mail quando o WhatsApp não é possível (exige o canal de e-mail ligado).
       pendenciaPorEmail: config.email.enabled,
       pedidoNovoCasa: config.reservationEvents.enabled && !!config.reservationEvents.venueTemplates.pedido_recebido,
+      confirmadaCasa: config.reservationEvents.enabled && !!config.reservationEvents.venueTemplates.confirmada, // v25
       lembreteCasa24h: !!config.venueNudge.template,
       vesperaCasa: config.venueBriefing.enabled && !!config.venueBriefing.template,
       agendaCasa: !!config.venueAgenda.template,
@@ -159,6 +160,7 @@ app.get("/health", (_req, res) => {
         encerramento: config.pendingClose.template,
         casaRecebido: config.reservationEvents.venueTemplates.pedido_recebido ?? "",
         casaCancelado: config.reservationEvents.venueTemplates.cancelado ?? "",
+        casaConfirmada: config.reservationEvents.venueTemplates.confirmada ?? "", // v25
         casaLembrete: config.venueNudge.template,
         casaVespera: config.venueBriefing.enabled ? config.venueBriefing.template : "",
         casaAgenda: config.venueAgenda.template,

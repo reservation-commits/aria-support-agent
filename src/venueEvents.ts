@@ -41,7 +41,7 @@ import { registrarMensagemEnviada } from "./deliveryStatus.js";
 import { avaliarTelefone, podeReceberWhatsApp } from "./phoneQuality.js";
 import { escolherLocale } from "./templateLocale.js";
 import { temTeto, tetoAtingido } from "./tetoRegra.js";
-import { montarParametrosEstabelecimento, type EventoEstabelecimento } from "./venueFormat.js";
+import { eventoDaCasa, montarParametrosEstabelecimento, type EventoEstabelecimento } from "./venueFormat.js";
 import { sendTemplate } from "./whatsapp.js";
 
 export type ResultadoEstabelecimento = {
@@ -214,23 +214,32 @@ async function enviarParaCasa(p: {
   return { acao: "enviado", detalhe: `${enviados} número(s)`, destinatarios: destinatarios.length };
 }
 
-/** Etapas 1 e 2 — chamadas pelo webhook de evento, ao lado do envio ao cliente. */
-export async function notificarEstabelecimento(p: PayloadEvento, r: EventReservationRow | null): Promise<ResultadoEstabelecimento> {
+/**
+ * Etapas 1 e 2 — chamadas pelo webhook de evento e pelo vigia, ao lado do envio ao cliente.
+ * v25: `novaJaAceita` (só o vigia sabe) — reserva vista pela primeira vez já aceita vira
+ * "confirmada" para a casa (confirmação automática). O webhook do n8n não sabe disso e não manda.
+ */
+export async function notificarEstabelecimento(
+  p: PayloadEvento,
+  r: EventReservationRow | null,
+  opts: { novaJaAceita?: boolean } = {},
+): Promise<ResultadoEstabelecimento> {
   if (!config.reservationEvents.enabled) return { acao: "canal_desligado", detalhe: "RESERVATION_EVENTS_ENABLED=false" };
-  if (p.event !== "pedido_recebido" && p.event !== "cancelado") return { acao: "nao_se_aplica", detalhe: `'${p.event}' não vai para a casa` };
-  const template = config.reservationEvents.venueTemplates[p.event] ?? "";
+  const evento = eventoDaCasa(p.event, !!opts.novaJaAceita);
+  if (!evento) return { acao: "nao_se_aplica", detalhe: `'${p.event}' não vai para a casa` };
+  const template = config.reservationEvents.venueTemplates[evento] ?? "";
   if (!template) {
     // Sem template para a casa NÃO é finding: a etapa da casa pode estar desligada de propósito.
-    return { acao: "sem_template", detalhe: `template da casa para '${p.event}' não configurado` };
+    return { acao: "sem_template", detalhe: `template da casa para '${evento}' não configurado` };
   }
   if (!r) return { acao: "reserva_nao_encontrada", detalhe: p.reservationCode };
   return enviarParaCasa({
-    evento: p.event,
+    evento,
     template,
     r,
     origem: "evento",
     traceId: p.traceId,
-    botaoUrlParam: p.event === "pedido_recebido" ? r.reservation_code : undefined,
+    botaoUrlParam: evento === "pedido_recebido" ? r.reservation_code : undefined,
   });
 }
 

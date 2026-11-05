@@ -16,8 +16,8 @@
  * ("*Data:* …"), e o fundador pediu uma mensagem impecável: "3 de out. de 2026"
  * parecia rascunho. O dia da semana ajuda a casa a conferir a agenda.
  *
- * A hora segue a convenção do país: 12h com AM/PM onde é o costume, 24h no
- * resto. Um americano lendo "20:00" hesita; "8:00 PM" ele não lê errado.
+ * A hora sai sempre em 12h com AM/PM ("8:00 PM"), em todos os países (v25, 05/11/2026,
+ * decisão do fundador). Até então só US/CA recebiam AM/PM e o resto via "20:00".
  */
 
 /** País E.164 → locale BCP47 para o Intl. Desconhecido cai em en-GB. */
@@ -84,19 +84,19 @@ export function formatarData(v: string | Date | null | undefined, pais: string |
   }
 }
 
-/** "20:00:00" + país → "8:00 PM" (US) ou "20:00". Vazio se não der. */
-export function formatarHora(v: string | null | undefined, pais: string | null): string {
+/**
+ * "20:00:00" → "8:00 PM". Vazio se não der.
+ * v25 (05/11/2026, decisão do fundador: "tudo em AM e PM direto"): 12 h com AM/PM em TODOS os
+ * países e nas mensagens ao cliente e à casa — antes só US/CA recebiam AM/PM. Montado à mão, com
+ * espaço comum (o Intl de en-US usa espaço estreito U+202F, que varia por versão do ICU).
+ * `pais` fica na assinatura por compatibilidade com os chamadores.
+ */
+export function formatarHora(v: string | null | undefined, _pais?: string | null): string {
   const hhmm = String(v ?? "").slice(0, 5);
   if (!/^\d{2}:\d{2}$/.test(hhmm)) return "";
   const [h, min] = hhmm.split(":").map(Number);
-  const dt = new Date(Date.UTC(2000, 0, 1, h, min));
-  try {
-    return new Intl.DateTimeFormat(intlLocaleForCountry(pais), {
-      hour: "numeric", minute: "2-digit", timeZone: "UTC",
-    }).format(dt);
-  } catch {
-    return hhmm;
-  }
+  if (h > 23 || min > 59) return "";
+  return `${h % 12 || 12}:${String(min).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
 }
 
 /**
